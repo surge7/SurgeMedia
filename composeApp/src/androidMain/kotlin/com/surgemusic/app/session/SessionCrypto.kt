@@ -1,6 +1,5 @@
 package com.surgemusic.app.session
 
-import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
@@ -8,6 +7,10 @@ import javax.crypto.spec.GCMParameterSpec
 /**
  * AES-256-GCM helpers over an explicit [SecretKey]. Pure javax.crypto so they are unit-testable
  * on the JVM; the AndroidKeyStore key provisioning lives in [KeystoreSessionStore].
+ *
+ * Encrypt NEVER passes a caller-provided IV: AndroidKeyStore keys forbid it
+ * ("Caller-provided IV not permitted") — the cipher generates the IV (12 bytes),
+ * works identically for software and Keystore keys, and it is prepended to the output.
  */
 object SessionCrypto {
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
@@ -16,9 +19,10 @@ object SessionCrypto {
 
     /** Returns `iv || ciphertext` (the GCM tag is appended to the ciphertext). */
     fun encrypt(key: SecretKey, plain: ByteArray): ByteArray {
-        val iv = ByteArray(IV_BYTES).also { SecureRandom().nextBytes(it) }
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_BITS, iv))
+        cipher.init(Cipher.ENCRYPT_MODE, key)
+        val iv = cipher.iv
+        check(iv.size == IV_BYTES) { "unexpected GCM IV length ${iv.size}" }
         return iv + cipher.doFinal(plain)
     }
 

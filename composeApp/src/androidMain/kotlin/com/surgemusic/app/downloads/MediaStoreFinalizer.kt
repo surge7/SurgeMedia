@@ -34,13 +34,18 @@ internal object MediaFiles {
     }
 
     /**
-     * MediaStore [MediaStore.MediaColumns.RELATIVE_PATH] under `Music/SurgeMusic/<album>/…`
-     * (MediaStore requires the value to end with a trailing slash; `/` collapsing covers an
-     * empty album/subdir segment).
+     * MediaStore [MediaStore.MediaColumns.RELATIVE_PATH] for the given collection kind.
+     *
+     * Android enforces collection-specific root dirs: audio may live under `Music/…`
+     * but images may only live under `Pictures/`, `DCIM/`, `Download/`… — a `Music/…`
+     * path on the Images collection throws and (before this was per-file-isolated)
+     * failed the whole finalize after the audio had already copied. Cover art therefore
+     * lands in `Pictures/SurgeMusic/<album>/` (verified on emulator 2026-10-12).
      */
-    internal fun relativePathFor(albumDir: String, fileDir: File?, torrentDir: File): String {
+    internal fun relativePathFor(kind: String, albumDir: String, fileDir: File?, torrentDir: File): String {
         val sub = fileDir?.toRelativeString(torrentDir) ?: ""
-        val path = "Music/SurgeMusic/$albumDir/$sub".replace("//", "/")
+        val rootDir = if (kind == KIND_AUDIO) "Music/SurgeMusic" else "Pictures/SurgeMusic"
+        val path = "$rootDir/$albumDir/$sub".replace("//", "/")
         return if (path.endsWith("/")) path else "$path/"
     }
 }
@@ -61,41 +66,48 @@ class MediaStoreFinalizer(private val context: Context) {
                 val torrentDir = root.listFiles()?.firstOrNull { it.isDirectory } ?: root
                 val albumDir = sanitize(item.request.title).take(120)
                 var copied = 0
+                val failedFiles = mutableListOf<String>()
                 torrentDir
                     .walkTopDown()
                     .filter { it.isFile }
                     .sortedBy { it.absolutePath }
                     .forEach { f ->
                         val (kind, mime) = MediaFiles.classifyFile(f.name) ?: return@forEach
-                        val collection = when (kind) {
-                            MediaFiles.KIND_AUDIO ->
-                                MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-
-                            MediaFiles.KIND_IMAGE ->
-                                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-
-                            else -> return@forEach
-                        }
-                        // insert pending → stream copy → clear pending (per file)
-                        val values = ContentValues().apply {
-                            put(MediaStore.MediaColumns.DISPLAY_NAME, f.name)
-                            put(MediaStore.MediaColumns.MIME_TYPE, mime)
-                            put(
-                                MediaStore.MediaColumns.RELATIVE_PATH,
-                                MediaFiles.relativePathFor(albumDir, f.parentFile, torrentDir),
-                            )
-                            put(MediaStore.MediaColumns.IS_PENDING, 1)
-                        }
-                        val uri = context.contentResolver.insert(collection, values)!!
-                        context.contentResolver.openOutputStream(uri)!!.use { out ->
-                            f.inputStream().use { it.copyTo(out) }
-                        }
-                        val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
-                        context.contentResolver.update(uri, done, null, null)
-                        copied++
+                        // Per-file isolation: one rejected file (e.g. an unsupported
+                        // path/mime combination) must not fail the whole batch.
+                        val ok = runCatching {
+                            val collection = when (kind) {
+                                MediaFiles.KIND_AUDIO ->
+                                    MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                                MediaFiles.KIND_IMAGE ->
+                                    MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                                else -> return@forEach
+                            }
+                            val values = ContentValues().apply {
+                                put(MediaStore.MediaColumns.DISPLAY_NAME, f.name)
+                                put(MediaStore.MediaColumns.MIME_TYPE, mime)
+                                put(
+                                    MediaStore.MediaColumns.RELATIVE_PATH,
+                                    MediaFiles.relativePathFor(kind, albumDir, f.parentFile, torrentDir),
+                                )
+                                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                            }
+                            val uri = context.contentResolver.insert(collection, values)
+                                ?: error("insert returned null for ${f.name}")
+                            context.contentResolver.openOutputStream(uri)!!.use { out ->
+                                f.inputStream().use { it.copyTo(out) }
+                            }
+                            val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+                            context.contentResolver.update(uri, done, null, null)
+                        }.isSuccess
+                        if (ok) copied++ else failedFiles.add(f.name)
                     }
                 root.deleteRecursively()
-                "$copied files → Music/SurgeMusic/$albumDir"
+                require(copied > 0) { "no files finalized${if (failedFiles.isNotEmpty()) "; failed: $failedFiles" else ""}" }
+                buildString {
+                    append("$copied files → Music/SurgeMusic/$albumDir")
+                    if (failedFiles.isNotEmpty()) append(" (skipped: ${failedFiles.joinToString()})")
+                }
             }
         }
 

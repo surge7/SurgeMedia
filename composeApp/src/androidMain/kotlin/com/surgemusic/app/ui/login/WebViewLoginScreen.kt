@@ -22,7 +22,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.surgemusic.app.AppContainer
 
 private const val LOGIN_URL = "https://rutracker.org/forum/login.php"
-private const val COOKIE_URL = "https://rutracker.org"
+// Must be a /forum/ URL: rutracker's bb_session cookie is path-scoped to /forum/,
+// and getCookie() only returns cookies whose path matches the query URL's path.
+private const val COOKIE_URL = "https://rutracker.org/forum/"
 
 /**
  * In-app WebView login (spec §4 "Cloudflare reality"): the user types their rutracker
@@ -67,7 +69,10 @@ fun WebViewLoginScreen(onFinished: (Boolean) -> Unit) {
                             override fun onPageFinished(view: WebView, url: String?) {
                                 if (finished) return
                                 val cookies = CookieManager.getInstance().getCookie(COOKIE_URL) ?: return
-                                if ("bb_session=" in cookies && "cf_clearance=" in cookies) {
+                                // bb_session proves login. cf_clearance is only present when
+                                // Cloudflare actually challenged this WebView — demand it only as
+                                // a bonus, never as a requirement (an unchallenged session works).
+                                if ("bb_session=" in cookies) {
                                     finished = true
                                     AppContainer.sessionStore.save(cookies, view.settings.userAgentString)
                                     onFinished(true)

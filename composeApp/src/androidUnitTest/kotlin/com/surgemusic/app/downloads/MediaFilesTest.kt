@@ -58,6 +58,7 @@ class MediaFilesTest {
     @Test
     fun relativePathIncludesAlbumAndSubdirectoryWithTrailingSlash() {
         val path = MediaFiles.relativePathFor(
+            kind = MediaFiles.KIND_AUDIO,
             albumDir = "Artist - Album (2020)",
             fileDir = File("/staging/6918211/TorrentName/CD1"),
             torrentDir = File("/staging/6918211/TorrentName"),
@@ -68,6 +69,7 @@ class MediaFilesTest {
     @Test
     fun relativePathHandlesDeeplyNestedDirectories() {
         val path = MediaFiles.relativePathFor(
+            kind = MediaFiles.KIND_AUDIO,
             albumDir = "Album",
             fileDir = File("/staging/1/T/a/b"),
             torrentDir = File("/staging/1/T"),
@@ -78,6 +80,7 @@ class MediaFilesTest {
     @Test
     fun relativePathForFileAtTorrentRootHasNoSubdirectorySegment() {
         val path = MediaFiles.relativePathFor(
+            kind = MediaFiles.KIND_AUDIO,
             albumDir = "Album",
             fileDir = File("/staging/1/T"),
             torrentDir = File("/staging/1/T"),
@@ -88,6 +91,7 @@ class MediaFilesTest {
     @Test
     fun relativePathWithNullFileDirStillEndsWithSlash() {
         val path = MediaFiles.relativePathFor(
+            kind = MediaFiles.KIND_AUDIO,
             albumDir = "Album",
             fileDir = null,
             torrentDir = File("/staging/1/T"),
@@ -96,8 +100,22 @@ class MediaFilesTest {
     }
 
     @Test
+    fun imagesGoToPicturesRootNotMusic() {
+        // Android rejects Music/… relative paths on the Images collection (verified on
+        // emulator): cover art must land under Pictures/.
+        val path = MediaFiles.relativePathFor(
+            kind = MediaFiles.KIND_IMAGE,
+            albumDir = "Album",
+            fileDir = File("/staging/1/T"),
+            torrentDir = File("/staging/1/T"),
+        )
+        assertEquals("Pictures/SurgeMusic/Album/", path)
+    }
+
+    @Test
     fun emptyAlbumDirCollapsesToLibraryRoot() {
         val path = MediaFiles.relativePathFor(
+            kind = MediaFiles.KIND_AUDIO,
             albumDir = "",
             fileDir = null,
             torrentDir = File("/staging/1/T"),
