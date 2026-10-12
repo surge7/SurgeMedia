@@ -15,6 +15,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.readBytes
 import io.ktor.http.ContentType
 import io.ktor.http.Parameters
 import io.ktor.http.contentType
@@ -74,8 +75,27 @@ class RutrackerClient(
         SearchPageParser.parse(html, query.start)
     }
 
-    private suspend fun <T> notImplementedYet(): T = throw NotImplementedError()
-    override suspend fun torrentFile(topicId: Long): Result<ByteArray> = runCatching { notImplementedYet() }
+    override suspend fun torrentFile(topicId: Long): Result<ByteArray> = runCatchingCtx {
+        val resp = withContext(Dispatchers.IO) {
+            http.get("$baseUrl/forum/dl.php") {
+                header("User-Agent", USER_AGENT)
+                header("Cookie", cookieHeader())
+                url.parameters.append("t", topicId.toString())
+            }
+        }
+        val bytes = resp.readBytes()
+        if (bytes.isNotEmpty() && bytes[0] == 'd'.code.toByte()) bytes
+        else {
+            val text = String(bytes, Charsets.UTF_8)
+            when {
+                text.contains("captcha", ignoreCase = true) ->
+                    throw TrackerError("download requires captcha; retry later", TrackerErrorKind.CAPTCHA)
+                text.contains("frm-login") || text.contains("login.php", ignoreCase = true) ->
+                    throw TrackerError("session expired while fetching torrent", TrackerErrorKind.AUTH)
+                else -> throw TrackerError("unexpected dl.php response", TrackerErrorKind.PARSE)
+            }
+        }
+    }
 
     companion object {
         const val DEFAULT_BASE_URL = "https://rutracker.org"
