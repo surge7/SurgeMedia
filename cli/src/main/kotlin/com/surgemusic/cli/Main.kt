@@ -7,7 +7,9 @@ import com.surgemusic.core.model.SearchQuery
 import com.surgemusic.core.model.SizeParser
 import com.surgemusic.core.tracker.TrackerError
 import com.surgemusic.core.tracker.jvm.RutrackerClient
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 import kotlin.system.exitProcess
@@ -113,25 +115,50 @@ private suspend fun cmdDownload(args: List<String>) {
         openSession(client)
         val torrentBytes = client.torrentFile(topicId).getOrElse { e -> println("torrent fetch FAILED: ${describe(e)}"); exitProcess(1) }
         println("torrent fetched (${torrentBytes.size} bytes) -> $outDir")
-        // `JLibTorrentEngine` implements only TorrentEngine (whose close() is its own member),
-        // not AutoCloseable, so stdlib `use {}` does not resolve; try/finally is equivalent.
         val engine = JLibTorrentEngine()
-        try {
-            engine.download(torrentBytes, outDir).collect { event ->
-                when (event) {
-                    is EngineEvent.Progress -> print(
-                        "\r${SizeParser.formatBytes(event.bytesDone)} / ${SizeParser.formatBytes(event.bytesTotal)}  " +
-                            "${SizeParser.formatBytes(event.downloadSpeed)}/s  peers=${event.peers}   "
-                    )
-                    is EngineEvent.Completed -> println("\ndownload complete: $outDir")
-                    is EngineEvent.Failed -> { println("\ndownload FAILED: ${event.message}"); exitProcess(1) }
+        val ok = try {
+            val id = "cli-$topicId"
+            // events is a SharedFlow with replay=0: events emitted while no collector is
+            // attached are dropped. So launch the collector FIRST (it completes `done` on
+            // the terminal event for `id`), then start, then await. `coroutineScope {}`
+            // cancels the collector when the block exits, however it exits.
+            val done = CompletableDeferred<Boolean>()
+            val result = coroutineScope {
+                val job = launch {
+                    engine.events.collect { ev ->
+                        if (ev.id != id) return@collect
+                        when (ev) {
+                            is EngineEvent.Added -> Unit
+                            is EngineEvent.Progress -> printProgress(ev)
+                            is EngineEvent.Completed -> { println("\ndownload complete: $outDir"); done.complete(true) }
+                            is EngineEvent.Failed -> { println("\ndownload FAILED: ${ev.message}"); done.complete(false) }
+                        }
+                    }
                 }
+                engine.start(id, torrentBytes, outDir)
+                done.await().also { job.cancel() }
             }
+            result
         } finally {
             engine.close()
         }
+        if (!ok) exitProcess(1)
     }
 }
+
+/** The sealed interface itself has no `id` member; every variant does. */
+private val EngineEvent.id: String
+    get() = when (this) {
+        is EngineEvent.Added -> id
+        is EngineEvent.Progress -> id
+        is EngineEvent.Completed -> id
+        is EngineEvent.Failed -> id
+    }
+
+private fun printProgress(ev: EngineEvent.Progress) = print(
+    "\r${SizeParser.formatBytes(ev.bytesDone)} / ${SizeParser.formatBytes(ev.bytesTotal)}  " +
+        "${SizeParser.formatBytes(ev.downloadSpeed)}/s  peers=${ev.peers}   "
+)
 
 private fun List<String>.option(name: String): String? {
     val i = indexOf(name)
