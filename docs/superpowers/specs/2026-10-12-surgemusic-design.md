@@ -302,7 +302,7 @@ Toolchain: Kotlin 2.x, AGP 8.x, Compose Multiplatform (stable desktop), Ktor 2/3
 - **Credentials:** in-app login screen as primary + git-ignored local dev file (`~/.config/surgemusic/credentials`) for the desktop harness (§9). Cookie-only paste mode remains a fast-follow if captcha blocks in-app login.
 - **Network:** rutracker.org is directly reachable from the user's devices — default base URL stands; mirrors and SOCKS proxy ship as settings-level fallbacks in the hardening phase, not first-run requirements.
 - **UI language:** English first; Russian strings as fast-follow.
-- **Build order:** desktop first (roadmap order: tracker core → engine → desktop app → Android app).
+- **Build order:** desktop first (roadmap order: tracker core → engine → desktop app → Android app). **Amended 2026-10-12 (user): Android app moves ahead of the desktop UI** — Phase 3 = Android app; the desktop UI follows and reuses the commonMain screens.
 - User has a rutracker account; guest mode is not supported (downloads require login).
 - minSdk 29 / macOS 13+ (Apple Silicon primary; Intel build included since jlibtorrent ships both).
 - Sequential download and file priorities are per-download toggles, default off.
