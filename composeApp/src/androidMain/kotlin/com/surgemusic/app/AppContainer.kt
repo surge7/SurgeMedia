@@ -3,23 +3,29 @@ package com.surgemusic.app
 import android.content.Context
 import android.content.Intent
 import com.surgemusic.app.downloads.DownloadService
+import com.surgemusic.app.downloads.MediaStoreFinalizer
 import com.surgemusic.app.downloads.NetworkGate
 import com.surgemusic.app.session.KeystoreSessionStore
 import com.surgemusic.app.session.SessionRepository
 import com.surgemusic.app.settings.SharedPreferencesStore
 import com.surgemusic.app.settings.SettingsStore
+import com.surgemusic.app.ui.downloads.DownloadsViewModel
 import com.surgemusic.app.ui.search.SearchViewModel
 import com.surgemusic.core.downloads.DownloadManager
+import com.surgemusic.core.downloads.DownloadRequest
 import com.surgemusic.core.engine.TorrentEngine
 import com.surgemusic.core.engine.jvm.JLibTorrentEngine
 import com.surgemusic.core.model.SearchQuery
+import com.surgemusic.core.model.SearchResultRow
 import com.surgemusic.core.tracker.jvm.RutrackerClient
+import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Manual DI: lazy singletons shared by all screens.
- * `engine`, `sessionStore`, `trackerClient()`, the search view model, `settings`
- * and `downloadManager` are wired (Tasks 5–7).
+ * `engine`, `sessionStore`, `trackerClient()`, the search/downloads view models,
+ * `settings`, `downloadManager` and the search→download pipeline ([download]) are
+ * wired (Tasks 5–8).
  */
 object AppContainer {
     lateinit var appContext: Context
@@ -59,17 +65,43 @@ object AppContainer {
     }
 
     /**
-     * Download queue (Task 7, interim wiring): exists from here so [DownloadService] and
-     * [NetworkGate] can observe it. The finalize hook is a placeholder — Task 8 replaces it
-     * with the MediaStoreFinalizer.
+     * Download queue (Task 8 wiring): the finalize hook moves a finished torrent's staged
+     * files into `Music/SurgeMusic/` via [MediaStoreFinalizer] (spec §6, scoped storage).
      */
     val downloadManager: DownloadManager by lazy {
         DownloadManager(
             engine = engine,
             maxConcurrent = settings.concurrentDownloads.value,
-            finalize = { _, _ -> Result.success("staging kept (finalizer wired in Task 8)") },
+            finalize = { item, staging -> MediaStoreFinalizer(appContext).finalize(item, staging) },
         )
     }
+
+    /** Downloads view model for the Downloads tab (Task 8). */
+    val downloadsViewModel: DownloadsViewModel by lazy { DownloadsViewModel(downloadManager) }
+
+    /**
+     * Full search→download pipeline (plan Task 8): fetch the .torrent, enqueue into
+     * [downloadManager] with a per-topic private staging dir, then bring the foreground
+     * service up. Failures (e.g. expired session on `dl.php`) propagate to the caller —
+     * the Search tab surfaces them as a snackbar.
+     */
+    suspend fun download(row: SearchResultRow): Result<Unit> =
+        trackerClient().torrentFile(row.topicId).map { torrent ->
+            val staging = File(appContext.getExternalFilesDir("staging"), row.topicId.toString())
+                .absolutePath
+            downloadManager.enqueue(
+                DownloadRequest(
+                    id = "t-${row.topicId}",
+                    topicId = row.topicId,
+                    title = row.title,
+                    forumName = row.forumName,
+                    sizeBytes = row.sizeBytes,
+                ),
+                torrent,
+                staging,
+            )
+            startDownloadService()
+        }
 
     private val networkGate: NetworkGate by lazy {
         NetworkGate(appContext) { downloadManager.items.value }

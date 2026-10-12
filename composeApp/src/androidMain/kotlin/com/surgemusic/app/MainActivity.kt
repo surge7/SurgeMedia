@@ -26,8 +26,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             App(
                 searchViewModel = AppContainer.searchViewModel,
+                downloadsViewModel = AppContainer.downloadsViewModel,
                 sessionRepository = AppContainer.sessionStore,
                 loginOverlay = { onFinished -> WebViewLoginScreen(onFinished) },
+                onDownload = { row -> AppContainer.download(row) },
             )
         }
     }
