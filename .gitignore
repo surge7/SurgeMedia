@@ -6,3 +6,4 @@ core/liveFixtures/
 .DS_Store
 local.properties
 .playwright-mcp/
+*.hprof
