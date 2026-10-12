@@ -7,3 +7,4 @@ core/liveFixtures/
 local.properties
 .playwright-mcp/
 *.hprof
+.build-artifacts/
