@@ -21,6 +21,9 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
         }
+        androidUnitTest.dependencies {
+            implementation(libs.kotlin.test)
+        }
     }
     jvmToolchain(21)
 }
