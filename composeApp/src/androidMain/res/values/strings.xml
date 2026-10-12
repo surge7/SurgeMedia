@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">SurgeMusic</string>
+    <string name="notification_channel_downloads">Downloads</string>
+    <string name="notification_title_downloads">SurgeMusic downloads</string>
+    <string name="notification_action_pause_all">Pause all</string>
 </resources>

@@ -1,14 +1,28 @@
 package com.surgemusic.app
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import com.surgemusic.app.ui.login.WebViewLoginScreen
 
 class MainActivity : ComponentActivity() {
+
+    private val requestNotifications =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* best effort */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppContainer.appContext = applicationContext
+        AppContainer.startNetworkGate()
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         setContent {
             App(
                 searchViewModel = AppContainer.searchViewModel,
@@ -16,5 +30,10 @@ class MainActivity : ComponentActivity() {
                 loginOverlay = { onFinished -> WebViewLoginScreen(onFinished) },
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        AppContainer.startDownloadService()
     }
 }
