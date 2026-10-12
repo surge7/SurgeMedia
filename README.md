@@ -4,8 +4,8 @@ Search rutracker.org for music (artists, albums, songs) and download it with a
 built-in torrent client into folders your music players can see. Android app +
 macOS desktop from one Kotlin Multiplatform codebase.
 
-**Status:** Phase 1 — shared core + desktop CLI, live-verified against
-rutracker.org. Desktop UI and the Android app come next
+**Status:** Phase 3 — shared core + desktop CLI (Phase 1) and the Android app
+(Phase 3) are live-verified against rutracker.org. The desktop UI comes next
 (see `docs/superpowers/specs/2026-10-12-surgemusic-design.md`).
 
 ## Legal
@@ -19,6 +19,31 @@ ships no tracker indexes or content.
 Requires JDK 21.
 
     ./gradlew :core:jvmTest :cli:build
+
+## Android app
+
+Build and install the debug APK:
+
+    ./gradlew :composeApp:assembleDebug
+    adb install -r composeApp/build/outputs/apk/debug/composeApp-debug.apk
+
+**Login:** the app cannot log in with a password (rutracker.org is behind a
+Cloudflare browser check), so it logs in in-app: Search or Settings → **Log
+in** opens a real in-app browser on `rutracker.org/forum/login.php` — type
+your credentials there, the browser engine solves Cloudflare and any captcha;
+as soon as the session cookies appear they are saved (encrypted with an
+AndroidKeyStore key) and the app is logged in. The session survives app
+restarts; if it ever expires, log in again, or paste a cookie header +
+User-Agent from desktop devtools under Settings → Manual import (advanced)
+and press **Validate** to check it.
+
+**Settings:** mirror URL, Wi-Fi-only downloads (auto-pauses on metered
+networks), and 1–5 concurrent downloads.
+
+**Storage:** finished downloads are copied into the public
+`Music/SurgeMusic/<album>/` folder via MediaStore, so every installed music
+player sees them without any manual copying. Temporary files download into
+the app's private staging area first and are cleaned up on completion.
 
 ## Sessions (Cloudflare) — read this first
 

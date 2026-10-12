@@ -16,15 +16,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import com.surgemusic.app.session.SessionRepository
 import com.surgemusic.app.ui.downloads.DownloadsScreen
 import com.surgemusic.app.ui.downloads.DownloadsViewModel
 import com.surgemusic.app.ui.search.SearchScreen
 import com.surgemusic.app.ui.search.SearchViewModel
+import com.surgemusic.app.ui.settings.SettingsScreen
+import com.surgemusic.app.ui.settings.SettingsViewModel
 import com.surgemusic.core.model.SearchResultRow
 import kotlinx.coroutines.launch
 
@@ -36,11 +36,12 @@ enum class AppTab(val label: String, val icon: String) {
 }
 
 /**
- * App shell (plan Tasks 4/6/8): three-tab bottom navigation; Search and Downloads tabs
- * are real; Settings remains a placeholder until Task 9.
+ * App shell (plan Tasks 4/6/8/9): three-tab bottom navigation; Search, Downloads and
+ * Settings tabs are all real.
  *
  * [loginOverlay] is a platform slot — androidMain passes [com.surgemusic.app.ui.login.WebViewLoginScreen]
  * (`WebViewLoginScreen` is android-only); it renders over the current tab while the login flow is up.
+ * Both the Search tab's "Log in" hero and the Settings tab's "Log in" button raise it.
  *
  * [onDownload] is the platform download pipeline (Task 8; androidMain: fetch .torrent →
  * enqueue → start the foreground service). Tapping a search result calls it; a failure is
@@ -50,6 +51,7 @@ enum class AppTab(val label: String, val icon: String) {
 fun App(
     searchViewModel: SearchViewModel,
     downloadsViewModel: DownloadsViewModel,
+    settingsViewModel: SettingsViewModel,
     sessionRepository: SessionRepository,
     loginOverlay: @Composable (onFinished: (Boolean) -> Unit) -> Unit,
     onDownload: suspend (SearchResultRow) -> Result<Unit>,
@@ -95,20 +97,16 @@ fun App(
                         onLogin = { showLogin = true },
                     )
                     AppTab.Downloads -> DownloadsScreen(viewModel = downloadsViewModel)
-                    AppTab.Settings -> CenteredText("Settings")
+                    AppTab.Settings -> SettingsScreen(
+                        viewModel = settingsViewModel,
+                        onLogin = { showLogin = true },
+                    )
                 }
                 if (showLogin) {
                     loginOverlay { showLogin = false }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun CenteredText(text: String) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text = text, textAlign = TextAlign.Center)
     }
 }
 

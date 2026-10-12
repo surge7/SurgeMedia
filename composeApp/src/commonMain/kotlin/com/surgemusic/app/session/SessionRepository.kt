@@ -34,3 +34,6 @@ class InMemorySessionRepository(initial: Session? = null) : SessionRepository {
 
 /** Wall clock, expect/actual so commonMain stays dependency-free. */
 internal expect fun nowEpochMs(): Long
+
+/** Locale date-time for the session save timestamp (Settings screen, plan Task 9). */
+internal expect fun formatTimestamp(epochMs: Long): String
