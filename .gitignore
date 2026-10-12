@@ -5,3 +5,4 @@ core/liveFixtures/
 *.torrent
 .DS_Store
 local.properties
+.playwright-mcp/
