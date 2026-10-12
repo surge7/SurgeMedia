@@ -206,7 +206,14 @@ Platform UI actuals: Android `Material3` dynamic theming; desktop gets a macOS-a
 
 ## 9. Security
 
-- Credentials stored encrypted at rest: Android Keystore-wrapped key + EncryptedSharedPreferences-equivalent (DataStore + Tink AEAD); desktop: macOS Keychain via `security` CLI wrapper (v1 acceptable: `chmod 600` prefs file; Keychain flagged as fast-follow).
+**Credential provisioning (user-confirmed):**
+
+- **Primary — in-app login screen:** username/password entered once in Settings; login over HTTPS; long-lived `bb_data` cookie persisted; transparent re-login on expiry.
+- **Dev-only — local untracked file:** the desktop dev/CLI harness (Phases 1–3) reads `~/.config/surgemusic/credentials` (format: two lines — username, password; `chmod 600`), which is git-ignored and never referenced by release builds. Lets the user test login/search/download flows without re-typing.
+- **Never:** credentials in the git repo, build config, CI variables (CI secrets only if live integration tests are added later), or shared in chat/issue trackers.
+
+**Storage at rest:** Android Keystore-wrapped key + Tink AEAD over DataStore; macOS Keychain (v1 acceptable: `chmod 600` prefs file; Keychain flagged as fast-follow).
+
 - No telemetry, no accounts beyond rutracker's, all traffic HTTPS + user-configurable proxy.
 - `.torrent` files are parsed by libtorrent (not executed); file extension allowlist warning if user enables "download everything".
 
@@ -278,10 +285,13 @@ Toolchain: Kotlin 2.x, AGP 8.x, Compose Multiplatform (stable desktop), Ktor 2/3
 
 ---
 
-## 15. Assumptions & open questions
+## 15. Confirmed decisions (2026-10-12, user-approved)
 
-- User has (or will create) a rutracker account; guest mode is not supported (downloads require login).
-- UI language: English first; ru strings as fast-follow (audience is Russian-speaking).
+- **Credentials:** in-app login screen as primary + git-ignored local dev file (`~/.config/surgemusic/credentials`) for the desktop harness (§9). Cookie-only paste mode remains a fast-follow if captcha blocks in-app login.
+- **Network:** rutracker.org is directly reachable from the user's devices — default base URL stands; mirrors and SOCKS proxy ship as settings-level fallbacks in the hardening phase, not first-run requirements.
+- **UI language:** English first; Russian strings as fast-follow.
+- **Build order:** desktop first (roadmap order: tracker core → engine → desktop app → Android app).
+- User has a rutracker account; guest mode is not supported (downloads require login).
 - minSdk 29 / macOS 13+ (Apple Silicon primary; Intel build included since jlibtorrent ships both).
 - Sequential download and file priorities are per-download toggles, default off.
-- Open Q (fast-follow, not blocking): Keychain storage on desktop; Music.app auto-import; F-Droid inclusion.
+- Fast-follow backlog (not blocking v1): macOS Keychain storage, Music.app auto-import, F-Droid inclusion.
