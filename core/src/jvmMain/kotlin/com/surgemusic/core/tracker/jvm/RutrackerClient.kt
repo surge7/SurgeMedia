@@ -3,6 +3,7 @@ package com.surgemusic.core.tracker.jvm
 import com.surgemusic.core.model.SearchQuery
 import com.surgemusic.core.model.SearchResultPage
 import com.surgemusic.core.tracker.TrackerClient
+
 import com.surgemusic.core.tracker.TrackerError
 import com.surgemusic.core.tracker.TrackerErrorKind
 import io.ktor.client.HttpClient
@@ -59,8 +60,21 @@ class RutrackerClient(
 
     override fun close() = http.close()
 
+    override suspend fun search(query: SearchQuery): Result<SearchResultPage> = runCatchingCtx {
+        require(query.text.isNotBlank()) { "query text must not be blank" }
+        val html = withContext(Dispatchers.IO) {
+            http.get("$baseUrl/forum/tracker.php") {
+                header("User-Agent", USER_AGENT)
+                header("Cookie", cookieHeader())
+                url.parameters.append("nm", query.text)
+                url.parameters.append("start", query.start.toString())
+                query.forumId?.let { url.parameters.append("f[]", it.toString()) }
+            }.bodyAsText()
+        }
+        SearchPageParser.parse(html, query.start)
+    }
+
     private suspend fun <T> notImplementedYet(): T = throw NotImplementedError()
-    override suspend fun search(query: SearchQuery): Result<SearchResultPage> = runCatching { notImplementedYet() }
     override suspend fun torrentFile(topicId: Long): Result<ByteArray> = runCatching { notImplementedYet() }
 
     companion object {
