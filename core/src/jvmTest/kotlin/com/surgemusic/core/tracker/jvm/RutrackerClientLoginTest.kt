@@ -18,9 +18,9 @@ class RutrackerClientLoginTest {
 
     private fun newClient() = RutrackerClient(baseUrl = server.url("/").toString().trimEnd('/')).also { client = it }
 
-    @Test fun loginCapturesBbDataCookie() = runTest {
+    @Test fun loginCapturesBbSessionCookie() = runTest {
         server.enqueue(
-            MockResponse().addHeader("Set-Cookie", "bb_data=abc123; path=/; domain=.rutracker.org")
+            MockResponse().addHeader("Set-Cookie", "bb_session=abc123; path=/forum/; domain=.rutracker.org")
                 .setBody("<html><body>logged in</body></html>")
         )
         val result = newClient().login("user", "pass")
@@ -28,6 +28,24 @@ class RutrackerClientLoginTest {
         val req = server.takeRequest()
         assertEquals("/forum/login.php", req.path?.substringBefore('?'))
         assertTrue(req.body.readUtf8().contains("login_username=user"))
+    }
+
+    @Test fun loginCapturesLegacyBbDataCookie() = runTest {
+        server.enqueue(
+            MockResponse().addHeader("Set-Cookie", "bb_data=legacy99; path=/forum/; domain=.rutracker.org")
+                .setBody("<html><body>logged in</body></html>")
+        )
+        val result = newClient().login("user", "pass")
+        assertTrue(result.isSuccess, "legacy bb_data login should succeed: ${result.exceptionOrNull()}")
+    }
+
+    @Test fun cloudflareChallengeOnLoginPageIsAuthErrorWithGuidance() = runTest {
+        server.enqueue(MockResponse().setBody("<html><title>Just a moment...</title>challenge</html>"))
+        val result = newClient().login("user", "pass")
+        assertTrue(result.isFailure)
+        val err = result.exceptionOrNull() as TrackerError
+        assertEquals(TrackerErrorKind.AUTH, err.kind)
+        assertTrue(err.message!!.contains("import a browser session"))
     }
 
     @Test fun loginFailureWithoutCookieIsAuthError() = runTest {

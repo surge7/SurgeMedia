@@ -20,7 +20,7 @@ class RutrackerClientSearchTest {
     private fun fixture() = javaClass.getResource("/fixtures/search_two_rows.html")!!.readText()
 
     @Test fun searchParsesResultsAndSendsCookie() = runTest {
-        server.enqueue(MockResponse().addHeader("Set-Cookie", "bb_data=ok").setBody("<html>ok</html>"))
+        server.enqueue(MockResponse().addHeader("Set-Cookie", "bb_session=ok").setBody("<html>ok</html>"))
         server.enqueue(MockResponse().setBody(fixture()))
         val c = RutrackerClient(baseUrl = server.url("/").toString().trimEnd('/')).also { client = it }
         assertTrue(c.login("user", "pass").isSuccess)
@@ -36,7 +36,7 @@ class RutrackerClientSearchTest {
         val searchReq = server.takeRequest()
         assertTrue(searchReq.path!!.startsWith("/forum/tracker.php"))
         assertTrue(searchReq.path!!.contains("nm=pink+floyd") || searchReq.path!!.contains("nm=pink%20floyd"))
-        assertTrue(searchReq.headers["Cookie"]!!.contains("bb_data=ok"))
+        assertTrue(searchReq.headers["Cookie"]!!.contains("bb_session=ok"))
         assertTrue(searchReq.headers["User-Agent"]!!.startsWith("Mozilla/5.0"))
     }
 

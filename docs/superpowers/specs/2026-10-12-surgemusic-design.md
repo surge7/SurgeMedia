@@ -108,6 +108,18 @@ interface OutputLocation {                 // expect/actual per platform
 
 ## 4. Rutracker integration
 
+### Cloudflare reality (verified 2026-10-12)
+
+rutracker.org (and the rutracker.net mirror) sit behind a **Cloudflare managed challenge** on all functional endpoints (`login.php`, `tracker.php`, `viewtopic.php`, `dl.php`); only the forum index is open. Consequences, all verified live:
+
+- **Password login from the app's HTTP client is dead on rutracker.org** — the login POST is challenge-gated (403 "Just a moment…"). Password login is kept only for mirrors that don't run the challenge.
+- **Imported browser sessions work.** A real browser solves the challenge once; the app then sends the harvested raw `Cookie` header (`bb_session`, `cf_clearance`, `bb_guid`, `bb_ssl`) **plus the exact User-Agent it was harvested with** (cf_clearance is bound to the UA) on every request. Verified with plain non-browser HTTP clients (Node undici, curl, and the app's OkHttp/Ktor client): search and `dl.php` both return real data.
+- **Auth cookie is `bb_session`** now (the classic `bb_data` is a legacy fallback). Expired sessions surface as a 302 to `login.php?redirect=…`, which the client detects and reports as AUTH.
+- **Content encoding is Windows-1251** — the client decodes via the response Content-Type charset.
+- Search-result markup specifics: title link `a.tt-text` (topic id in `data-topic_id`), forum `td.f-name-col a`, **exact byte size in `td.tor-size[data-ts_text]`**, seeds `b.seedmed`, leechers `td.leechmed`. Topic titles conventionally embed leading `(Genre) [Source]` tags — kept as-is.
+
+**Architecture consequence (Phase 2):** the desktop app gets an embedded WebView login window (user logs in once, Cloudflare solves itself in the real engine, the app harvests cookies from the WebView store). The Android app gets the same via Chrome Custom Tabs + manual cookie paste as fallback. The CLI takes sessions from `~/.config/surgemusic/cookies` (line 1: raw Cookie header; line 2: User-Agent) or `RUTRACKER_COOKIES`/`RUTRACKER_UA` env.
+
 No official API exists; the established approach (used by qBittorrent plugins, Python `rutracker-api`, Rust `rutracker_api`) is authenticated HTML scraping. Endpoints (stable for 10+ years):
 
 | Purpose | Request |

@@ -15,6 +15,7 @@ import kotlin.system.exitProcess
 fun main(args: Array<String>) = runBlocking {
     when (args.getOrNull(0)?.lowercase()) {
         "login" -> cmdLogin()
+        "session" -> cmdSession()
         // `runBlocking`'s lambda is not inline, so a bare non-local `return` is prohibited;
         // usage() returns Nothing, so the labelled return is well-typed and equivalent.
         "search" -> cmdSearch(args.getOrNull(1) ?: return@runBlocking usage("search requires a query"))
@@ -27,17 +28,39 @@ fun main(args: Array<String>) = runBlocking {
 private fun newClient(): RutrackerClient =
     RutrackerClient(baseUrl = System.getenv("RUTRACKER_BASE")?.takeIf { it.isNotBlank() } ?: RutrackerClient.DEFAULT_BASE_URL)
 
-private fun requireCredentials(): Credentials =
-    loadCredentials() ?: run {
+/**
+ * Establishes a tracker session: an imported browser session (Cloudflare-era primary
+ * mode on rutracker.org) when one is configured, otherwise password login.
+ */
+private suspend fun openSession(client: RutrackerClient) {
+    val session = loadSessionConfig()
+    if (session != null) {
+        client.importSession(cookieHeader = session.cookieHeader, harvestedUserAgent = session.userAgent)
+        return
+    }
+    val creds = loadCredentials() ?: run {
         System.err.println(
-            "No credentials. Either set RUTRACKER_USER/RUTRACKER_PASS or create\n" +
-                "~/.config/surgemusic/credentials with username on line 1, password on line 2 (chmod 600)."
+            "No session configured. rutracker.org sits behind a Cloudflare browser check, so the\n" +
+                "primary mode is an imported browser session:\n" +
+                "  1. log into rutracker.org in your browser\n" +
+                "  2. copy the raw Cookie request header (devtools → Network → any forum request)\n" +
+                "  3. write it to ~/.config/surgemusic/cookies (line 1: cookies, line 2: your browser's User-Agent), chmod 600\n" +
+                "Alternatively, for mirrors without the Cloudflare check: RUTRACKER_USER/RUTRACKER_PASS\n" +
+                "or ~/.config/surgemusic/credentials (user line 1, password line 2)."
         )
         exitProcess(2)
     }
+    client.login(creds.username, creds.password).getOrElse { e ->
+        println("login FAILED: ${describe(e)}")
+        exitProcess(1)
+    }
+}
 
 private suspend fun cmdLogin() {
-    val creds = requireCredentials()
+    val creds = loadCredentials() ?: run {
+        System.err.println("No credentials. Set RUTRACKER_USER/RUTRACKER_PASS or ~/.config/surgemusic/credentials (user line 1, pass line 2).")
+        exitProcess(2)
+    }
     newClient().use { client ->
         client.login(creds.username, creds.password)
             .onSuccess { println("login OK") }
@@ -45,10 +68,24 @@ private suspend fun cmdLogin() {
     }
 }
 
-private suspend fun cmdSearch(query: String) {
-    val creds = requireCredentials()
+/** Validates the imported browser session with a live search round-trip. */
+private suspend fun cmdSession() {
+    val session = loadSessionConfig() ?: run {
+        System.err.println("No imported session. Put the raw Cookie header from a logged-in browser into ~/.config/surgemusic/cookies")
+        exitProcess(2)
+    }
     newClient().use { client ->
-        client.login(creds.username, creds.password).getOrElse { e -> println("login FAILED: ${describe(e)}"); exitProcess(1) }
+        client.importSession(cookieHeader = session.cookieHeader, harvestedUserAgent = session.userAgent)
+        client.search(SearchQuery(text = "test")).fold(
+            onSuccess = { page -> println("session OK — live search returned ${page.rows.size} results") },
+            onFailure = { e -> println("session FAILED: ${describe(e)}"); exitProcess(1) },
+        )
+    }
+}
+
+private suspend fun cmdSearch(query: String) {
+    newClient().use { client ->
+        openSession(client)
         // `Result.fold`'s lambdas are not inline, so a bare non-local `return` is prohibited;
         // expressed as if/else with identical behavior.
         client.search(SearchQuery(text = query)).fold(
@@ -71,10 +108,9 @@ private suspend fun cmdSearch(query: String) {
 private suspend fun cmdDownload(args: List<String>) {
     val topicId = args.getOrNull(0)?.toLongOrNull() ?: return usage("download requires a numeric topicId")
     val outDir = args.drop(1).option("--out") ?: Path.of(System.getProperty("user.home"), "Music", "SurgeMusic").toString()
-    val creds = requireCredentials()
 
     newClient().use { client ->
-        client.login(creds.username, creds.password).getOrElse { e -> println("login FAILED: ${describe(e)}"); exitProcess(1) }
+        openSession(client)
         val torrentBytes = client.torrentFile(topicId).getOrElse { e -> println("torrent fetch FAILED: ${describe(e)}"); exitProcess(1) }
         println("torrent fetched (${torrentBytes.size} bytes) -> $outDir")
         // `JLibTorrentEngine` implements only TorrentEngine (whose close() is its own member),
@@ -111,10 +147,13 @@ private fun usage(error: String?): Nothing {
         """
         SurgeMusic ${Version.APP}
         usage:
-          surgemusic login
+          surgemusic session                  validate the imported browser session
+          surgemusic login                    password login (mirrors without Cloudflare)
           surgemusic search <query>
           surgemusic download <topicId> [--out DIR]
-        env: RUTRACKER_USER, RUTRACKER_PASS, RUTRACKER_BASE
+        env: RUTRACKER_COOKIES (+ RUTRACKER_UA), RUTRACKER_USER/RUTRACKER_PASS, RUTRACKER_BASE
+        session file: ~/.config/surgemusic/cookies  (line 1: raw Cookie header from a logged-in
+                     browser; line 2: that browser's User-Agent; chmod 600)
         credentials file: ~/.config/surgemusic/credentials (user\npass, chmod 600)
         """.trimIndent()
     )
