@@ -14,4 +14,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "SurgeMusic"
-include(":core", ":cli")
+include(":core", ":cli", ":composeApp")
