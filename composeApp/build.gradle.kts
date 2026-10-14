@@ -10,6 +10,10 @@ plugins {
 kotlin {
     androidTarget { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
 
+    // Desktop JVM target — :composeApp:compileKotlinJvm keeps commonMain multiplatform-clean.
+    // Desktop-only deps (compose.desktop.currentOs) and Main.kt land in plan Task 5.
+    jvm { compilerOptions { jvmTarget.set(JvmTarget.JVM_21) } }
+
     sourceSets {
         commonMain.dependencies {
             implementation(project(":core"))
@@ -18,6 +22,13 @@ kotlin {
             implementation(compose.material3)
             implementation(compose.materialIconsExtended)
             implementation(libs.kotlinx.coroutines.core)
+        }
+        // Desktop platform layer for the jvm target (plan Tasks 5/6 add the rest of it).
+        // The default hierarchy template is disabled, so wire dependsOn manually —
+        // same pattern as :core's jvmShared.
+        val desktopMain by creating { dependsOn(commonMain.get()) }
+        jvmMain {
+            dependsOn(desktopMain)
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
