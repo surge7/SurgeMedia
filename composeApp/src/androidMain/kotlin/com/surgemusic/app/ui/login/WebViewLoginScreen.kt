@@ -79,7 +79,12 @@ fun WebViewLoginScreen(onFinished: (Boolean) -> Unit) {
                                 }
                             }
                         }
-                        loadUrl(LOGIN_URL)
+                        // The WebView cookie jar persists across opens: a bb_session left over from
+                        // a previous login would make onPageFinished "succeed" instantly and close
+                        // this screen before the user ever sees the login form. Always start from
+                        // a clean (logged-out) jar.
+                        cookieManager.removeSessionCookies(null)
+                        cookieManager.removeAllCookies { loadUrl(LOGIN_URL) }
                     }
                 },
                 onRelease = { it.destroy() },
