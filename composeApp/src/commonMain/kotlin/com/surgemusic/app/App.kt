@@ -1,13 +1,27 @@
 package com.surgemusic.app
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
@@ -19,8 +33,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import com.surgemusic.app.session.SessionRepository
+import com.surgemusic.app.ui.components.CyberSnackbarHost
 import com.surgemusic.app.ui.details.DetailsScreen
 import com.surgemusic.app.ui.downloads.DownloadsScreen
 import com.surgemusic.app.ui.downloads.DownloadsViewModel
@@ -31,16 +48,20 @@ import com.surgemusic.app.ui.settings.SettingsViewModel
 import com.surgemusic.core.model.SearchResultRow
 import kotlinx.coroutines.launch
 
-/** Bottom-nav tabs; navigation is plain state (no navigation library this phase). */
-enum class AppTab(val label: String, val icon: String) {
-    Search("Search", "🔍"),
-    Downloads("Downloads", "⬇"),
-    Settings("Settings", "⚙"),
+/** Nav tabs; navigation is plain state (no navigation library this phase). */
+enum class AppTab(val label: String, val icon: ImageVector) {
+    Search("Search", Icons.Rounded.Search),
+    Downloads("Downloads", Icons.Rounded.Download),
+    Settings("Settings", Icons.Rounded.Settings),
 }
 
+/** Width at or below which the shell switches from NavigationRail to bottom NavigationBar. */
+private val CompactBreakpoint = 700.dp
+
 /**
- * App shell (plan Tasks 4/6/8/9): three-tab bottom navigation; Search, Downloads and
- * Settings tabs are all real.
+ * Adaptive app shell (plan Tasks 4/6/8/9): three tabs — bottom NavigationBar on compact
+ * windows, a NavigationRail on expanded ones (desktop window / tablet). Search, Downloads
+ * and Settings tabs are all real.
  *
  * [loginOverlay] is a platform slot — androidMain passes [com.surgemusic.app.ui.login.WebViewLoginScreen]
  * (`WebViewLoginScreen` is android-only); it renders over the current tab while the login flow is up.
@@ -111,75 +132,128 @@ fun App(
     }
 
     SurgeMusicTheme {
-        Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            // A full-screen overlay (Details drill-down or the login WebView) would leave the
-            // nav bar visible but its taps masked by the overlay — tabs would switch invisibly.
-            // Hide the bar while either overlay is up.
-            bottomBar = {
-                if (selectedRow == null && !showLogin) {
-                    NavigationBar {
-                        AppTab.entries.forEach { tab ->
-                            NavigationBarItem(
-                                selected = currentTab == tab,
-                                onClick = { currentTab = tab },
-                                icon = { Text(tab.icon, fontSize = 20.sp) },
-                                label = { Text(tab.label) },
-                            )
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val compact = maxWidth < CompactBreakpoint
+
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                snackbarHost = { CyberSnackbarHost(hostState = snackbarHostState) },
+                // A full-screen overlay (Details drill-down or the login WebView) would leave the
+                // nav bar visible but its taps masked by the overlay — tabs would switch invisibly.
+                // Hide the bar while either overlay is up. On expanded layouts there is no bottom
+                // bar at all (the rail lives inside the content row).
+                bottomBar = {
+                    if (compact && selectedRow == null && !showLogin) {
+                        NavigationBar(
+                            containerColor = MaterialTheme.colorScheme.background,
+                        ) {
+                            AppTab.entries.forEach { tab ->
+                                NavigationBarItem(
+                                    selected = currentTab == tab,
+                                    onClick = { currentTab = tab },
+                                    icon = { Icon(tab.icon, contentDescription = tab.label) },
+                                    label = { Text(tab.label.uppercase()) },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                                        selectedTextColor = MaterialTheme.colorScheme.primary,
+                                        indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    ),
+                                )
+                            }
                         }
                     }
-                }
-            },
-        ) { padding ->
-            Box(
-                modifier = Modifier.padding(padding).fillMaxSize(),
-            ) {
-                when (currentTab) {
-                    AppTab.Search -> SearchScreen(
-                        viewModel = searchViewModel,
-                        loggedIn = session != null,
-                        onShowDetails = { row ->
-                            selectedRow = row
-                            detailsError = null
-                            detailsDownloading = false
-                            detailsAdded = false
-                        },
-                        onLogin = { showLogin = true },
-                    )
-                    AppTab.Downloads -> DownloadsScreen(viewModel = downloadsViewModel)
-                    AppTab.Settings -> SettingsScreen(
-                        viewModel = settingsViewModel,
-                        onLogin = { showLogin = true },
-                    )
-                }
-                if (showLogin) {
-                    loginOverlay { showLogin = false }
+                },
+            ) { padding ->
+                val tabContent: @Composable () -> Unit = {
+                    when (currentTab) {
+                        AppTab.Search -> SearchScreen(
+                            viewModel = searchViewModel,
+                            loggedIn = session != null,
+                            onShowDetails = { row ->
+                                selectedRow = row
+                                detailsError = null
+                                detailsDownloading = false
+                                detailsAdded = false
+                            },
+                            onLogin = { showLogin = true },
+                        )
+                        AppTab.Downloads -> DownloadsScreen(viewModel = downloadsViewModel)
+                        AppTab.Settings -> SettingsScreen(
+                            viewModel = settingsViewModel,
+                            onLogin = { showLogin = true },
+                        )
+                    }
+                    if (showLogin) {
+                        loginOverlay { showLogin = false }
+                    }
+
+                    val row = selectedRow
+                    if (row != null) {
+                        DetailsScreen(
+                            row = row,
+                            onBack = {
+                                selectedRow = null
+                                detailsError = null
+                                detailsDownloading = false
+                                detailsAdded = false
+                            },
+                            onOpenDownloads = {
+                                selectedRow = null
+                                detailsError = null
+                                detailsDownloading = false
+                                detailsAdded = false
+                                currentTab = AppTab.Downloads
+                            },
+                            downloading = detailsDownloading,
+                            added = detailsAdded,
+                            error = detailsError,
+                            onDownload = {
+                                scope.launch { runDownload(row) }
+                            },
+                        )
+                    }
                 }
 
-                val row = selectedRow
-                if (row != null) {
-                    DetailsScreen(
-                        row = row,
-                        onBack = {
-                            selectedRow = null
-                            detailsError = null
-                            detailsDownloading = false
-                            detailsAdded = false
-                        },
-                        onOpenDownloads = {
-                            selectedRow = null
-                            detailsError = null
-                            detailsDownloading = false
-                            detailsAdded = false
-                            currentTab = AppTab.Downloads
-                        },
-                        downloading = detailsDownloading,
-                        added = detailsAdded,
-                        error = detailsError,
-                        onDownload = {
-                            scope.launch { runDownload(row) }
-                        },
-                    )
+                if (compact) {
+                    Box(
+                        modifier = Modifier.padding(padding).fillMaxSize(),
+                    ) {
+                        tabContent()
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.padding(padding).fillMaxSize(),
+                    ) {
+                        NavigationRail(
+                            containerColor = Color.Transparent,
+                            header = {
+                                Box(
+                                    modifier = Modifier
+                                        .width(2.dp)
+                                        .height(24.dp)
+                                        .background(MaterialTheme.colorScheme.primary),
+                                )
+                            },
+                        ) {
+                            AppTab.entries.forEach { tab ->
+                                NavigationRailItem(
+                                    selected = currentTab == tab,
+                                    onClick = { currentTab = tab },
+                                    icon = { Icon(tab.icon, contentDescription = tab.label) },
+                                    label = { Text(tab.label.uppercase()) },
+                                    colors = NavigationRailItemDefaults.colors(
+                                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    ),
+                                )
+                            }
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            tabContent()
+                        }
+                    }
                 }
             }
         }
