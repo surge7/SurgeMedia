@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -19,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,14 +32,18 @@ import com.surgemusic.app.ui.components.CyberTextField
 import com.surgemusic.app.ui.components.CyberTextButton
 import com.surgemusic.app.ui.theme.CyberCyan
 import com.surgemusic.core.tracker.jvm.RutrackerClient
+import kotlinx.coroutines.launch
 
 /**
  * Desktop sign-in (plan Task 6) — the paste-cookie twin of androidMain's
  * [com.surgemusic.app.ui.login.WebViewLoginScreen]: desktop has no embedded browser, so
  * the user copies their browser's raw Cookie header + User-Agent (cf_clearance is
  * UA-bound) into the panel. SAVE validates the cookie non-blank, persists through
- * [AppContainer.sessionStore] and exits via [onFinished]; CANCEL exits directly. Both
- * paths share the single `() -> Unit` exit (the android overlay distinguishes them with a
+ * [AppContainer.sessionStore], runs the shared validate probe ([AppContainer.validateSession] —
+ * plan Task 6: "save(...) + validate via settings probe") and exits via [onFinished] only
+ * when the probe passes; a failed probe keeps the panel open with the reason inline, the
+ * same contract as the Settings tab's manual import. CANCEL exits directly. Both paths
+ * share the single `() -> Unit` exit (the android overlay distinguishes them with a
  * Boolean) — Main maps it to `onFinished(false)`, which the shell only uses to hide the
  * overlay; session state drives the UI.
  */
@@ -45,6 +51,9 @@ import com.surgemusic.core.tracker.jvm.RutrackerClient
 fun DesktopLoginScreen(onFinished: () -> Unit) {
     var cookieHeader by remember { mutableStateOf("") }
     var userAgent by remember { mutableStateOf("") }
+    var checking by remember { mutableStateOf(false) }
+    var saveError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -103,11 +112,32 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                     CyberButton(
                         text = "SAVE SESSION",
                         onClick = {
+                            checking = true
+                            saveError = null
                             AppContainer.sessionStore.save(cookieHeader.trim(), userAgent.trim())
-                            onFinished()
+                            scope.launch {
+                                AppContainer.validateSession().fold(
+                                    onSuccess = { onFinished() },
+                                    onFailure = { e ->
+                                        checking = false
+                                        saveError = "Session check failed: " +
+                                            (e.message ?: e::class.simpleName ?: "unknown error")
+                                    },
+                                )
+                            }
                         },
-                        enabled = cookieHeader.isNotBlank(),
+                        enabled = cookieHeader.isNotBlank() && !checking,
                         modifier = Modifier.padding(start = 16.dp),
+                    )
+                }
+                if (checking) {
+                    CircularProgressIndicator(modifier = Modifier.padding(top = 8.dp))
+                } else if (saveError != null) {
+                    Text(
+                        text = saveError.orEmpty(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp),
                     )
                 }
             }

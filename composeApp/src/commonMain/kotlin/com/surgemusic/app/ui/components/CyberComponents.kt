@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -263,7 +262,14 @@ fun ScanlineDivider(modifier: Modifier = Modifier) {
     )
 }
 
-/** Status-bar-aware top bar with optional back action and a cyan accent bar before the title. */
+/**
+ * Top bar with optional back action and a cyan accent bar before the title. It carries no
+ * inset padding of its own: it renders inside the Scaffold body, whose content keeps the
+ * default system-bar insets (plan Task 2), so the status-bar clearance arrives via the
+ * forwarded content padding. The plan's Task-1 `statusBarsPadding()` prescription double-
+ * padded under that forwarding once edge-to-edge landed (final-review F1) and was dropped
+ * here; only call [CyberTopBar] inside an already-inset container.
+ */
 @Composable
 fun CyberTopBar(
     title: String,
@@ -272,7 +278,6 @@ fun CyberTopBar(
 ) {
     Row(
         modifier = modifier
-            .statusBarsPadding()
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,

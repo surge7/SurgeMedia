@@ -95,15 +95,24 @@ object AppContainer {
     /**
      * Settings view model for the Settings tab: session management + manual import over
      * [sessionStore], network prefs over [settings], and the validate probe —
-     * `trackerClient().search(SearchQuery("test"))` (plan Task 9).
+     * [validateSession] (plan Task 9).
      */
     val settingsViewModel: SettingsViewModel by lazy {
         SettingsViewModel(
             sessionRepository = sessionStore,
             settings = settings,
-            validateSession = { trackerClient().search(SearchQuery(text = "test")).map { } },
+            validateSession = { validateSession() },
         )
     }
+
+    /**
+     * Shared validate probe — the plan's "settings probe" (Task 9): one test search through
+     * the tracker client. Used by the Settings tab (Validate button + manual import) and by
+     * [com.surgemusic.app.ui.login.DesktopLoginScreen]'s SAVE path (Task 6: save +
+     * validate via the settings probe, then exit only when it passes).
+     */
+    suspend fun validateSession(): Result<Unit> =
+        trackerClient().search(SearchQuery(text = "test")).map { }
 
     /**
      * Full search→download pipeline (plan Task 8): fetch the .torrent, enqueue into

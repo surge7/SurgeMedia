@@ -230,28 +230,34 @@ fun App(
                     Row(
                         modifier = Modifier.padding(padding).fillMaxSize(),
                     ) {
-                        NavigationRail(
-                            containerColor = Color.Transparent,
-                            header = {
-                                Box(
-                                    modifier = Modifier
-                                        .width(2.dp)
-                                        .height(24.dp)
-                                        .background(MaterialTheme.colorScheme.primary),
-                                )
-                            },
-                        ) {
-                            AppTab.entries.forEach { tab ->
-                                NavigationRailItem(
-                                    selected = currentTab == tab,
-                                    onClick = { currentTab = tab },
-                                    icon = { Icon(tab.icon, contentDescription = tab.label) },
-                                    label = { Text(tab.label.uppercase()) },
-                                    colors = NavigationRailItemDefaults.colors(
-                                        selectedIconColor = MaterialTheme.colorScheme.primary,
-                                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    ),
-                                )
+                        // Same gating as the compact bottom bar above: while a full-screen
+                        // overlay (Details drill-down or login) is up, hide the rail — it
+                        // would otherwise stay interactive beside the overlay and switch
+                        // tabs invisibly beneath it (final-review F3).
+                        if (selectedRow == null && !showLogin) {
+                            NavigationRail(
+                                containerColor = Color.Transparent,
+                                header = {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(2.dp)
+                                            .height(24.dp)
+                                            .background(MaterialTheme.colorScheme.primary),
+                                    )
+                                },
+                            ) {
+                                AppTab.entries.forEach { tab ->
+                                    NavigationRailItem(
+                                        selected = currentTab == tab,
+                                        onClick = { currentTab = tab },
+                                        icon = { Icon(tab.icon, contentDescription = tab.label) },
+                                        label = { Text(tab.label.uppercase()) },
+                                        colors = NavigationRailItemDefaults.colors(
+                                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        ),
+                                    )
+                                }
                             }
                         }
                         Box(modifier = Modifier.weight(1f)) {

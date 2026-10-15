@@ -14,9 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -43,8 +41,10 @@ private const val COOKIE_URL = "https://rutracker.org/forum/"
  * once it holds both `bb_session=` and `cf_clearance=` the session is saved via
  * [AppContainer.sessionStore] and [onFinished](true) fires. "Cancel" fires [onFinished](false).
  *
- * Runs edge-to-edge (Task 4): the cyberpunk header carries [statusBarsPadding] and the
- * WebView panel clears the nav bar with [navigationBarsPadding]. The WebView setup —
+ * Runs edge-to-edge (Task 4): it renders inside the Scaffold body, whose content keeps the
+ * default system-bar insets (plan Task 2), so the header and WebView are cleared by the
+ * forwarded content padding alone — the original [statusBarsPadding]/[navigationBarsPadding]
+ * double-padded under that forwarding (final-review F1). The WebView setup —
  * JS, DOM storage, cookie polling and the pre-clear logic — is unchanged.
  */
 @SuppressLint("SetJavaScriptEnabled")
@@ -59,7 +59,6 @@ fun WebViewLoginScreen(onFinished: (Boolean) -> Unit) {
             // uppercase title, with the existing Cancel action as a CyberTextButton.
             Row(
                 modifier = Modifier
-                    .statusBarsPadding()
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -82,7 +81,6 @@ fun WebViewLoginScreen(onFinished: (Boolean) -> Unit) {
             AndroidView(
                 modifier = Modifier
                     .fillMaxSize()
-                    .navigationBarsPadding()
                     .padding(16.dp)
                     .border(1.dp, CyberGrid),
                 factory = { context ->
