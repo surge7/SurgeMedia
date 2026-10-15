@@ -1,0 +1,116 @@
+package com.surgemusic.app.ui.login
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.surgemusic.app.AppContainer
+import com.surgemusic.app.ui.components.CyberButton
+import com.surgemusic.app.ui.components.CyberPanel
+import com.surgemusic.app.ui.components.CyberTextField
+import com.surgemusic.app.ui.components.CyberTextButton
+import com.surgemusic.app.ui.theme.CyberCyan
+import com.surgemusic.core.tracker.jvm.RutrackerClient
+
+/**
+ * Desktop sign-in (plan Task 6) — the paste-cookie twin of androidMain's
+ * [com.surgemusic.app.ui.login.WebViewLoginScreen]: desktop has no embedded browser, so
+ * the user copies their browser's raw Cookie header + User-Agent (cf_clearance is
+ * UA-bound) into the panel. SAVE validates the cookie non-blank, persists through
+ * [AppContainer.sessionStore] and exits via [onFinished]; CANCEL exits directly. Both
+ * paths share the single `() -> Unit` exit (the android overlay distinguishes them with a
+ * Boolean) — Main maps it to `onFinished(false)`, which the shell only uses to hide the
+ * overlay; session state drives the UI.
+ */
+@Composable
+fun DesktopLoginScreen(onFinished: () -> Unit) {
+    var cookieHeader by remember { mutableStateOf("") }
+    var userAgent by remember { mutableStateOf("") }
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CyberPanel(
+                modifier = Modifier.widthIn(max = 480.dp).padding(16.dp),
+                contentPadding = PaddingValues(20.dp),
+            ) {
+                // CyberTopBar look: cyan accent bar + uppercase titleMedium.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .width(2.dp)
+                            .height(18.dp)
+                            .background(CyberCyan),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "SIGN IN",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Text(
+                    text = "Desktop has no embedded browser. Open the tracker in your browser, " +
+                        "sign in, then copy the request's Cookie header (F12 → Network → any request " +
+                        "→ request headers → cookie) and your browser's User-Agent.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+                CyberTextField(
+                    value = cookieHeader,
+                    onValueChange = { cookieHeader = it },
+                    label = "Cookie header",
+                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                    minLines = 2,
+                    maxLines = 4,
+                )
+                CyberTextField(
+                    value = userAgent,
+                    onValueChange = { userAgent = it },
+                    label = "User-Agent",
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    singleLine = true,
+                    placeholder = RutrackerClient.USER_AGENT,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CyberTextButton(text = "CANCEL", onClick = onFinished)
+                    CyberButton(
+                        text = "SAVE SESSION",
+                        onClick = {
+                            AppContainer.sessionStore.save(cookieHeader.trim(), userAgent.trim())
+                            onFinished()
+                        },
+                        enabled = cookieHeader.isNotBlank(),
+                        modifier = Modifier.padding(start = 16.dp),
+                    )
+                }
+            }
+        }
+    }
+}

@@ -1,19 +1,21 @@
 package com.surgemusic.app
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.surgemusic.app.ui.login.DesktopLoginScreen
 
-/** Compose Desktop entry point — launches the themed window (plan Task 5). */
+/**
+ * Compose Desktop entry point (plan Tasks 5/6): the themed window hosts the real [App]
+ * shell over the desktop DI container — same wiring as androidMain MainActivity minus the
+ * platform extras (no edge-to-edge, no permission prompts, no foreground service). The
+ * login overlay is the paste-cookie [DesktopLoginScreen]; its single `() -> Unit` exit is
+ * mapped to the shell's `(Boolean) -> Unit` as `false` — App only hides the overlay on
+ * that callback (App.kt passes `{ showLogin = false }`), session state drives the UI.
+ */
 fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
@@ -26,20 +28,15 @@ fun main() = application {
             position = WindowPosition(Alignment.Center),
         ),
     ) {
-        SurgeMusicTheme {
-            // Task 6 replaces this placeholder
-            CyberSkeletonPlaceholder()
-        }
-    }
-}
-
-@Composable
-private fun CyberSkeletonPlaceholder() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(
-            text = "SURGEMUSIC // DESKTOP SKELETON",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onBackground,
+        // App() applies SurgeMusicTheme itself (commonMain App.kt) — wrapping again here
+        // would double-apply the theme; androidMain's setContent calls it bare as well.
+        App(
+            searchViewModel = AppContainer.searchViewModel,
+            downloadsViewModel = AppContainer.downloadsViewModel,
+            settingsViewModel = AppContainer.settingsViewModel,
+            sessionRepository = AppContainer.sessionStore,
+            loginOverlay = { onFinished -> DesktopLoginScreen(onFinished = { onFinished(false) }) },
+            onDownload = { row -> AppContainer.download(row) },
         )
     }
 }
