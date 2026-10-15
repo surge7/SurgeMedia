@@ -4,9 +4,13 @@ import com.surgemusic.app.ui.settings.AppSettings
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Properties
+import java.util.concurrent.Executors
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /**
  * App settings on desktop (plan Task 6): `java.util.Properties` persisted at
@@ -14,16 +18,24 @@ import kotlinx.coroutines.flow.asStateFlow
  * Wi-Fi only = on, mirror = `https://rutracker.org`, 3 concurrent downloads — and the same
  * keys, so a hand-copied file ports between platforms.
  *
- * Thread safety: setters take [ioLock] so persist-then-emit is atomic per write (racing
- * setters would otherwise interleave `Properties.store`); the [StateFlow]s themselves are
- * concurrent-safe. In practice writes come from the Compose main thread. Setters persist
- * first, then emit — same order as androidMain. A missing or corrupt file loads as defaults.
+ * Write discipline (desktop twin of androidMain's SharedPreferences `apply()`, which never
+ * touches disk on the calling thread): setters mutate the in-memory [Properties] and emit
+ * synchronously, then flush a snapshot FIFO on the single-threaded daemon
+ * [persistScope] — last write wins on disk, and no file IO runs on the UI (AWT EDT)
+ * thread. A failed flush is swallowed like `apply()`; a missing or corrupt file loads as
+ * defaults.
  */
 class DesktopSettingsStore(
     private val homeDir: Path = Path.of(System.getProperty("user.home")),
 ) : AppSettings {
     private val propsFile = homeDir.resolve(DIR).resolve(FILE)
     private val ioLock = Any()
+
+    /** All disk writes on one daemon thread: flush order matches setter order. */
+    private val persistScope = CoroutineScope(
+        Executors.newSingleThreadExecutor { r -> Thread(r, "surgemusic-settings-persist").apply { isDaemon = true } }
+            .asCoroutineDispatcher(),
+    )
 
     private val props: Properties = load()
 
@@ -37,29 +49,32 @@ class DesktopSettingsStore(
     override val concurrentDownloads: StateFlow<Int> = _concurrentDownloads.asStateFlow()
 
     override fun setWifiOnly(enabled: Boolean) {
-        synchronized(ioLock) {
+        val snapshot = synchronized(ioLock) {
             props.setProperty(KEY_WIFI_ONLY, enabled.toString())
-            persist()
             _wifiOnly.value = enabled
+            props.clone() as Properties
         }
+        flushAsync(snapshot)
     }
 
     override fun setMirror(url: String) {
-        synchronized(ioLock) {
+        val snapshot = synchronized(ioLock) {
             props.setProperty(KEY_MIRROR, url)
-            persist()
             _mirror.value = url
+            props.clone() as Properties
         }
+        flushAsync(snapshot)
     }
 
     /** The Settings screen exposes a 1–5 slider (Task 9); clamping keeps hand-edited values safe. */
     override fun setConcurrentDownloads(count: Int) {
         val clamped = count.coerceIn(MIN_CONCURRENT_DOWNLOADS, MAX_CONCURRENT_DOWNLOADS)
-        synchronized(ioLock) {
+        val snapshot = synchronized(ioLock) {
             props.setProperty(KEY_CONCURRENT_DOWNLOADS, clamped.toString())
-            persist()
             _concurrentDownloads.value = clamped
+            props.clone() as Properties
         }
+        flushAsync(snapshot)
     }
 
     private fun load(): Properties {
@@ -70,9 +85,13 @@ class DesktopSettingsStore(
         return props
     }
 
-    private fun persist() {
-        Files.createDirectories(propsFile.parent)
-        Files.newOutputStream(propsFile).use { props.store(it, null) }
+    private fun flushAsync(snapshot: Properties) {
+        persistScope.launch {
+            runCatching {
+                Files.createDirectories(propsFile.parent)
+                Files.newOutputStream(propsFile).use { snapshot.store(it, null) }
+            } // failed flush is swallowed, like SharedPreferences.apply()
+        }
     }
 
     private fun readWifiOnly(): Boolean =

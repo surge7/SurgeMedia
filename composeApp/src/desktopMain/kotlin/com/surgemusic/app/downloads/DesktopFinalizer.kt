@@ -21,8 +21,11 @@ import kotlinx.coroutines.withContext
  * collection-specific roots, which desktop has no equivalent of.
  *
  * Moves use `ATOMIC_MOVE`; on [AtomicMoveNotSupportedException] (staging and home on
- * different volumes) it falls back to copy+delete. Runs off the main thread; any failure
- * surfaces as `Result.failure` for DownloadManager to render on the item.
+ * different volumes) it falls back to copy+delete. The album directory is created lazily,
+ * by the first moved file's parent-dir creation, so an all-skipped batch leaves no empty
+ * `~/Music/SurgeMusic/<album>` behind (android MediaStore creates nothing until the first
+ * insert either). Runs off the main thread; any failure surfaces as `Result.failure` for
+ * DownloadManager to render on the item.
  */
 object DesktopFinalizer {
 
@@ -36,8 +39,9 @@ object DesktopFinalizer {
                 val stagingRoot = File(staging) // …/staging/<topicId>/<torrentName>/files…
                 val torrentDir = stagingRoot.listFiles()?.firstOrNull { it.isDirectory } ?: stagingRoot
                 val albumDir = sanitize(item.request.title).take(120)
+                // No eager createDirectories: the first successful move creates the album
+                // tree via moveIntoMusic's parent-dir creation (all-skipped → no empty dir).
                 val musicRoot = musicRoot().resolve(albumDir)
-                Files.createDirectories(musicRoot)
                 var moved = 0
                 val failedFiles = mutableListOf<String>()
                 torrentDir

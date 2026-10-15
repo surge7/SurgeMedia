@@ -3,9 +3,13 @@ package com.surgemusic.app.session
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Properties
+import java.util.concurrent.Executors
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /**
  * [SessionRepository] on desktop (plan Task 6): plain `java.util.Properties` at
@@ -13,37 +17,48 @@ import kotlinx.coroutines.flow.asStateFlow
  * cookie/user-agent are devtools-pasted by hand and the file lives under the user's own
  * home, scoped by the OS to the user account (androidMain encrypts via AndroidKeyStore).
  * An existing session loads on init; a missing, unreadable or malformed file is treated
- * as logged out. Thread safety: the same synchronized persist-then-emit discipline as
- * `DesktopSettingsStore` — `save`/`clear` hold [ioLock] across the file write and the
- * flow update.
+ * as logged out.
+ *
+ * Write discipline (androidMain `KeystoreSessionStore` flushes via SharedPreferences
+ * `apply()`, off the calling thread): `save`/`clear` update the [StateFlow] synchronously
+ * and flush the file FIFO on the single-threaded daemon [persistScope] — no file IO
+ * on the UI (AWT EDT) thread, last write wins on disk, a failed flush is swallowed like
+ * `apply()`.
  */
 class FileSessionStore(
     private val homeDir: Path = Path.of(System.getProperty("user.home")),
 ) : SessionRepository {
     private val propsFile = homeDir.resolve(DIR).resolve(FILE)
-    private val ioLock = Any()
+
+    /** All disk writes on one daemon thread: flush order matches save/clear order. */
+    private val persistScope = CoroutineScope(
+        Executors.newSingleThreadExecutor { r -> Thread(r, "surgemusic-session-persist").apply { isDaemon = true } }
+            .asCoroutineDispatcher(),
+    )
 
     private val _session = MutableStateFlow(readSession())
     override val session: StateFlow<Session?> = _session.asStateFlow()
 
     override fun save(cookieHeader: String, userAgent: String) {
         val savedAt = nowEpochMs()
-        synchronized(ioLock) {
-            val props = Properties().apply {
-                setProperty(KEY_COOKIE, cookieHeader)
-                setProperty(KEY_USER_AGENT, userAgent)
-                setProperty(KEY_SAVED_AT, savedAt.toString())
-            }
-            Files.createDirectories(propsFile.parent)
-            Files.newOutputStream(propsFile).use { props.store(it, null) }
-            _session.value = Session(cookieHeader, userAgent, savedAt)
+        val props = Properties().apply {
+            setProperty(KEY_COOKIE, cookieHeader)
+            setProperty(KEY_USER_AGENT, userAgent)
+            setProperty(KEY_SAVED_AT, savedAt.toString())
+        }
+        _session.value = Session(cookieHeader, userAgent, savedAt)
+        persistScope.launch {
+            runCatching {
+                Files.createDirectories(propsFile.parent)
+                Files.newOutputStream(propsFile).use { props.store(it, null) }
+            } // failed flush is swallowed, like SharedPreferences.apply()
         }
     }
 
     override fun clear() {
-        synchronized(ioLock) {
-            Files.deleteIfExists(propsFile)
-            _session.value = null
+        _session.value = null
+        persistScope.launch {
+            runCatching { Files.deleteIfExists(propsFile) } // async + silent on failure, like apply()
         }
     }
 
