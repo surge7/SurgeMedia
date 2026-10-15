@@ -27,6 +27,9 @@ kotlin {
         // The default hierarchy template is disabled, so wire dependsOn manually —
         // same pattern as :core's jvmShared.
         val desktopMain by creating { dependsOn(commonMain.get()) }
+        desktopMain.dependencies {
+            implementation(compose.desktop.currentOs)
+        }
         jvmMain {
             dependsOn(desktopMain)
         }
@@ -39,6 +42,12 @@ kotlin {
         }
     }
     jvmToolchain(21)
+}
+
+compose.desktop.application {
+    // JvmApplication.mainClass is a plain String var in compose-gradle-plugin 1.8.1
+    // (no Property.set) — assign directly.
+    mainClass = "com.surgemusic.app.MainKt"
 }
 
 android {
