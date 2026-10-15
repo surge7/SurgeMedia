@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.surgemusic.app.session.SessionRepository
+import com.surgemusic.app.ui.back.PlatformBackHandler
 import com.surgemusic.app.ui.components.CyberSnackbarHost
 import com.surgemusic.app.ui.details.DetailsScreen
 import com.surgemusic.app.ui.downloads.DownloadsScreen
@@ -188,6 +189,9 @@ fun App(
                     if (showLogin) {
                         loginOverlay { showLogin = false }
                     }
+                    // System back closes the login overlay (same action as its Cancel path),
+                    // not the activity behind it.
+                    PlatformBackHandler(enabled = showLogin) { showLogin = false }
 
                     val row = selectedRow
                     if (row != null) {

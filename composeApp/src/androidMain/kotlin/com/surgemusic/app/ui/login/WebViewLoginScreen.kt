@@ -5,21 +5,31 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.surgemusic.app.AppContainer
+import com.surgemusic.app.ui.components.CyberTextButton
+import com.surgemusic.app.ui.theme.CyberCyan
+import com.surgemusic.app.ui.theme.CyberGrid
 
 private const val LOGIN_URL = "https://rutracker.org/forum/login.php"
 // Must be a /forum/ URL: rutracker's bb_session cookie is path-scoped to /forum/,
@@ -32,27 +42,49 @@ private const val COOKIE_URL = "https://rutracker.org/forum/"
  * browser engine. On each page load the cookie jar for `https://rutracker.org` is checked;
  * once it holds both `bb_session=` and `cf_clearance=` the session is saved via
  * [AppContainer.sessionStore] and [onFinished](true) fires. "Cancel" fires [onFinished](false).
+ *
+ * Runs edge-to-edge (Task 4): the cyberpunk header carries [statusBarsPadding] and the
+ * WebView panel clears the nav bar with [navigationBarsPadding]. The WebView setup —
+ * JS, DOM storage, cookie polling and the pre-clear logic — is unchanged.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun WebViewLoginScreen(onFinished: (Boolean) -> Unit) {
-    Surface(modifier = Modifier.fillMaxSize()) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
         Column {
+            // Cyberpunk top bar matching CyberTopBar (commonMain): cyan accent bar +
+            // uppercase title, with the existing Cancel action as a CyberTextButton.
             Row(
                 modifier = Modifier
+                    .statusBarsPadding()
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "Log in to rutracker",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
+                Box(
+                    modifier = Modifier
+                        .width(2.dp)
+                        .height(18.dp)
+                        .background(CyberCyan),
                 )
-                TextButton(onClick = { onFinished(false) }) { Text("Cancel") }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "SIGN IN",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.weight(1f))
+                CyberTextButton(text = "Cancel", onClick = { onFinished(false) })
             }
             AndroidView(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+                    .padding(16.dp)
+                    .border(1.dp, CyberGrid),
                 factory = { context ->
                     WebView(context).apply {
                         layoutParams = ViewGroup.LayoutParams(
