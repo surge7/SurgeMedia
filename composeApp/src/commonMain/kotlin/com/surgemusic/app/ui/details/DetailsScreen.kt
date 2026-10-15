@@ -8,19 +8,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.surgemusic.app.ui.back.PlatformBackHandler
+import com.surgemusic.app.ui.components.CyberButton
+import com.surgemusic.app.ui.components.CyberChip
+import com.surgemusic.app.ui.components.CyberTopBar
+import com.surgemusic.app.ui.components.ScanlineDivider
 import com.surgemusic.core.model.SearchResultRow
 import com.surgemusic.core.model.SizeParser
 
@@ -55,9 +55,12 @@ fun DetailsScreen(
     // finishing the activity behind it.
     PlatformBackHandler(onBack = onBack)
 
-    Surface(modifier = modifier.fillMaxSize()) {
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
-            TopBar(onBack = onBack)
+            CyberTopBar(title = "Details", onBack = onBack)
 
             Column(
                 modifier = Modifier
@@ -77,10 +80,7 @@ fun DetailsScreen(
                 DetailRow("Topic ID", "#${row.topicId}")
 
                 if (error != null) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant,
-                    )
+                    ScanlineDivider(modifier = Modifier.padding(vertical = 8.dp))
                     Text(
                         text = "Last attempt failed",
                         style = MaterialTheme.typography.titleSmall,
@@ -106,31 +106,17 @@ fun DetailsScreen(
 }
 
 @Composable
-private fun TopBar(onBack: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TextButton(onClick = onBack) { Text("Back") }
-        Text(
-            text = "Details",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(start = 4.dp),
-        )
-    }
-}
-
-@Composable
 private fun DetailRow(label: String, value: String) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
+            text = label.uppercase(),
+            style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
             text = value,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
         )
     }
 }
@@ -146,7 +132,6 @@ private fun BottomBar(
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.End,
     ) {
         when {
             downloading -> {
@@ -155,17 +140,34 @@ private fun BottomBar(
                     text = "Fetching torrent…",
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                CyberChip(
+                    text = "FETCHING",
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
             }
             added -> {
-                OutlinedButton(onClick = onOpenDownloads) {
-                    Text("Added — open Downloads")
-                }
+                CyberButton(
+                    text = "Added — open Downloads",
+                    onClick = onOpenDownloads,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
             error != null -> {
-                Button(onClick = onDownload) { Text("Retry") }
+                CyberButton(
+                    text = "Retry",
+                    onClick = onDownload,
+                    modifier = Modifier.fillMaxWidth(),
+                    emphasis = true,
+                )
             }
             else -> {
-                Button(onClick = onDownload) { Text("Download") }
+                CyberButton(
+                    text = "Download",
+                    onClick = onDownload,
+                    modifier = Modifier.fillMaxWidth(),
+                    emphasis = true,
+                )
             }
         }
     }

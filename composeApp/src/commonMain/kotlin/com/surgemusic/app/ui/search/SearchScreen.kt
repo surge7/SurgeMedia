@@ -6,18 +6,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -26,6 +27,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.surgemusic.app.ui.components.CyberButton
+import com.surgemusic.app.ui.components.CyberPanel
+import com.surgemusic.app.ui.components.CyberTextButton
+import com.surgemusic.app.ui.components.CyberTextField
+import com.surgemusic.app.ui.components.cyberPanel
 import com.surgemusic.core.model.SearchResultRow
 import com.surgemusic.core.model.SizeParser
 
@@ -59,22 +65,23 @@ fun SearchScreen(
         if (!loggedIn) LoginHero(onLogin = onLogin)
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
+            CyberTextField(
                 value = query,
                 onValueChange = viewModel::onQueryChange,
+                label = "Search rutracker",
                 modifier = Modifier.weight(1f),
-                label = { Text("Search rutracker") },
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { if (query.isNotBlank()) viewModel.search() }),
+                imeAction = ImeAction.Search,
+                keyboardActions = KeyboardActions(
+                    onSearch = { if (query.isNotBlank()) viewModel.search() },
+                ),
             )
             Spacer(Modifier.width(8.dp))
-            Button(
+            CyberButton(
+                text = "Search",
                 onClick = viewModel::search,
                 enabled = query.isNotBlank() && uiState !is SearchUiState.Loading,
-            ) {
-                Text("Search")
-            }
+            )
         }
 
         when (val state = uiState) {
@@ -85,20 +92,24 @@ fun SearchScreen(
                 if (results.isEmpty()) {
                     Hint("No results for \"$query\".")
                 } else {
-                    LazyColumn(modifier = Modifier.padding(top = 8.dp).weight(1f)) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .weight(1f)
+                            .imePadding(),
+                    ) {
                         items(results, key = { it.topicId }) { row ->
                             ResultRowItem(row = row, onShowDetails = onShowDetails)
                         }
                         if (state.hasMore) {
                             item {
-                                Button(
+                                CyberButton(
+                                    text = "Load more",
                                     onClick = viewModel::loadMore,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(vertical = 8.dp),
-                                ) {
-                                    Text("Load more")
-                                }
+                                )
                             }
                         }
                     }
@@ -110,20 +121,27 @@ fun SearchScreen(
 
 @Composable
 private fun LoginHero(onLogin: () -> Unit) {
-    Column(
+    CyberPanel(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 12.dp),
     ) {
-        Text("Log in to rutracker", style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "Log in to rutracker".uppercase(),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
         Text(
             "Searching and downloading need a rutracker session. Log in once in the in-app browser.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
         )
-        Button(onClick = onLogin, modifier = Modifier.padding(top = 8.dp)) {
-            Text("Log in")
-        }
+        CyberButton(
+            text = "Log in",
+            onClick = onLogin,
+            modifier = Modifier.padding(top = 8.dp),
+        )
     }
 }
 
@@ -132,49 +150,73 @@ private fun Hint(text: String) {
     Text(
         text = text,
         modifier = Modifier.padding(top = 16.dp),
-        style = MaterialTheme.typography.bodyMedium,
+        style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
 @Composable
 private fun ResultRowItem(row: SearchResultRow, onShowDetails: (SearchResultRow) -> Unit) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .cyberPanel()
             .clickable { onShowDetails(row) }
-            .padding(vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = row.title,
-            style = MaterialTheme.typography.bodyLarge,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = "${row.forumName} · ${SizeParser.formatBytes(row.sizeBytes)} · " +
-                "↑${row.seeds} ↓${row.leechs} · ${row.dateText}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = row.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "${row.forumName} · ${SizeParser.formatBytes(row.sizeBytes)} · " +
+                    "↑${row.seeds} ↓${row.leechs} · ${row.dateText}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            imageVector = Icons.Rounded.ChevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
 @Composable
 private fun ErrorBanner(state: SearchUiState.Error, onRetry: () -> Unit, onLogin: () -> Unit) {
-    Column(modifier = Modifier.padding(top = 16.dp)) {
+    Row(
+        modifier = Modifier.padding(top = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Warning,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+        )
         Text(
             text = "Search failed: ${state.message}",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.error,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp),
         )
-        Row {
-            TextButton(onClick = onRetry) { Text("Retry") }
-            if (state.needsLogin) {
-                TextButton(onClick = onLogin) { Text("Log in") }
-            }
+        CyberTextButton(text = "Retry", onClick = onRetry)
+        if (state.needsLogin) {
+            CyberTextButton(
+                text = "Log in",
+                onClick = onLogin,
+                modifier = Modifier.padding(start = 8.dp),
+            )
         }
     }
 }

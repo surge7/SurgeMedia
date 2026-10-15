@@ -5,19 +5,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -30,6 +28,12 @@ import androidx.compose.ui.unit.dp
 import com.surgemusic.app.session.Session
 import com.surgemusic.app.session.SessionRepository
 import com.surgemusic.app.session.formatTimestamp
+import com.surgemusic.app.ui.components.CyberButton
+import com.surgemusic.app.ui.components.CyberPanel
+import com.surgemusic.app.ui.components.CyberSectionHeader
+import com.surgemusic.app.ui.components.CyberTextField
+import com.surgemusic.app.ui.components.CyberTextButton
+import com.surgemusic.app.ui.components.ScanlineDivider
 import com.surgemusic.core.Version
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -150,130 +154,149 @@ fun SettingsScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            .imePadding()
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        SectionHeader("Session")
-        Text(
-            text = when (val s = session) {
-                null -> "Not logged in"
-                else -> "Logged in (saved ${formatTimestamp(s.savedAtEpochMs)})"
-            },
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Row {
-            Button(onClick = onLogin) { Text("Log in") }
-            OutlinedButton(
-                onClick = viewModel::validate,
-                enabled = !validating,
-                modifier = Modifier.padding(start = 8.dp),
-            ) { Text("Validate") }
-            TextButton(
-                onClick = viewModel::logOut,
-                enabled = session != null,
-                modifier = Modifier.padding(start = 8.dp),
-            ) { Text("Log out") }
-        }
-        if (validating) {
-            CircularProgressIndicator(Modifier.padding(top = 8.dp))
-        } else if (validationStatus != null) {
+        CyberPanel(modifier = Modifier.fillMaxWidth()) {
+            CyberSectionHeader("Session", modifier = Modifier.padding(bottom = 4.dp))
             Text(
-                text = validationStatus.orEmpty(),
-                modifier = Modifier.padding(top = 8.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (validationStatus.orEmpty().startsWith("Session OK")) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.error
+                text = when (val s = session) {
+                    null -> "Not logged in"
+                    else -> "Logged in (saved ${formatTimestamp(s.savedAtEpochMs)})"
                 },
-            )
-        }
-
-        HorizontalDivider(Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-        SectionHeader("Manual import (advanced)")
-        Text(
-            "Paste the raw Cookie header and User-Agent from a logged-in desktop browser " +
-                "(devtools → Network → any forum/ request). cf_clearance is bound to the User-Agent.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        ManualImportFields(onImport = viewModel::importSession)
-
-        HorizontalDivider(Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-        SectionHeader("Network")
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "Download on Wi-Fi only",
-                modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Switch(checked = wifiOnly, onCheckedChange = viewModel::setWifiOnly)
+            Row(modifier = Modifier.padding(top = 8.dp)) {
+                CyberTextButton(text = "Log in", onClick = onLogin)
+                CyberButton(
+                    text = "Validate",
+                    onClick = viewModel::validate,
+                    enabled = !validating,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+                CyberTextButton(
+                    text = "Log out",
+                    onClick = viewModel::logOut,
+                    tint = MaterialTheme.colorScheme.error,
+                    enabled = session != null,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+            if (validating) {
+                CircularProgressIndicator(Modifier.padding(top = 8.dp))
+            } else if (validationStatus != null) {
+                Text(
+                    text = validationStatus.orEmpty(),
+                    modifier = Modifier.padding(top = 8.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (validationStatus.orEmpty().startsWith("Session OK")) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+            }
         }
-        MirrorField(committed = mirror, onApply = viewModel::applyMirror)
-        Text(
-            text = "Concurrent downloads: $concurrentDownloads",
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(top = 8.dp),
-        )
-        Slider(
-            value = concurrentDownloads.toFloat(),
-            onValueChange = { viewModel.setConcurrentDownloads(it.roundToInt()) },
-            valueRange = 1f..5f,
-            steps = 3, // discrete stops at 1, 2, 3, 4, 5
-        )
 
-        HorizontalDivider(Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-        SectionHeader("About")
-        Text(
-            text = "SurgeMusic ${Version.APP}",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        ScanlineDivider(Modifier.padding(vertical = 16.dp))
+        CyberPanel(modifier = Modifier.fillMaxWidth()) {
+            CyberSectionHeader("Manual import (advanced)", modifier = Modifier.padding(bottom = 4.dp))
+            Text(
+                "Paste the raw Cookie header and User-Agent from a logged-in desktop browser " +
+                    "(devtools → Network → any forum/ request). cf_clearance is bound to the User-Agent.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ManualImportFields(onImport = viewModel::importSession)
+        }
+
+        ScanlineDivider(Modifier.padding(vertical = 16.dp))
+        CyberPanel(modifier = Modifier.fillMaxWidth()) {
+            CyberSectionHeader("Network", modifier = Modifier.padding(bottom = 4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Download on Wi-Fi only",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Switch(
+                    checked = wifiOnly,
+                    onCheckedChange = viewModel::setWifiOnly,
+                    colors = SwitchDefaults.colors(
+                        checkedTrackColor = MaterialTheme.colorScheme.primary,
+                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                        uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        uncheckedBorderColor = MaterialTheme.colorScheme.outline,
+                        uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+                )
+            }
+            MirrorField(committed = mirror, onApply = viewModel::applyMirror)
+            Text(
+                text = "Concurrent downloads: $concurrentDownloads",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Slider(
+                value = concurrentDownloads.toFloat(),
+                onValueChange = { viewModel.setConcurrentDownloads(it.roundToInt()) },
+                valueRange = 1f..5f,
+                steps = 3, // discrete stops at 1, 2, 3, 4, 5
+                colors = SliderDefaults.colors(
+                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                    inactiveTrackColor = MaterialTheme.colorScheme.outline,
+                    thumbColor = MaterialTheme.colorScheme.primary,
+                ),
+            )
+        }
+
+        ScanlineDivider(Modifier.padding(vertical = 16.dp))
+        CyberPanel(modifier = Modifier.fillMaxWidth()) {
+            CyberSectionHeader("About", modifier = Modifier.padding(bottom = 4.dp))
+            Text(
+                text = "SurgeMusic ${Version.APP}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
-}
-
-@Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.padding(bottom = 4.dp),
-    )
 }
 
 @Composable
 private fun ManualImportFields(onImport: (cookieHeader: String, userAgent: String) -> Unit) {
     var cookieHeader by remember { mutableStateOf("") }
     var userAgent by remember { mutableStateOf("") }
-    OutlinedTextField(
+    CyberTextField(
         value = cookieHeader,
         onValueChange = { cookieHeader = it },
+        label = "Cookie header",
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        label = { Text("Cookie header") },
         minLines = 2,
         maxLines = 4,
     )
-    OutlinedTextField(
+    CyberTextField(
         value = userAgent,
         onValueChange = { userAgent = it },
+        label = "User-Agent",
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        label = { Text("User-Agent") },
         singleLine = true,
     )
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         horizontalArrangement = Arrangement.End,
     ) {
-        Button(
+        CyberButton(
+            text = "Import",
             onClick = {
                 onImport(cookieHeader, userAgent)
                 cookieHeader = ""
                 userAgent = ""
             },
             enabled = cookieHeader.isNotBlank(),
-        ) { Text("Import") }
+        )
     }
 }
 
@@ -284,20 +307,21 @@ private fun ManualImportFields(onImport: (cookieHeader: String, userAgent: Strin
 @Composable
 private fun MirrorField(committed: String, onApply: (String) -> Unit) {
     var text by remember(committed) { mutableStateOf(committed) }
-    OutlinedTextField(
+    CyberTextField(
         value = text,
         onValueChange = { text = it },
+        label = "Mirror URL",
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        label = { Text("Mirror URL") },
         singleLine = true,
     )
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
         horizontalArrangement = Arrangement.End,
     ) {
-        Button(
+        CyberButton(
+            text = "Apply",
             onClick = { onApply(text) },
             enabled = text.isNotBlank() && text.trim() != committed.trim(),
-        ) { Text("Apply") }
+        )
     }
 }
