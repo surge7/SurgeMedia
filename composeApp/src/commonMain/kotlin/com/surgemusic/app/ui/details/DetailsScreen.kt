@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -21,6 +22,7 @@ import com.surgemusic.app.ui.components.CyberButton
 import com.surgemusic.app.ui.components.CyberChip
 import com.surgemusic.app.ui.components.CyberTopBar
 import com.surgemusic.app.ui.components.ScanlineDivider
+import com.surgemusic.core.model.MediaInfo
 import com.surgemusic.core.model.SearchResultRow
 import com.surgemusic.core.model.SizeParser
 
@@ -75,6 +77,8 @@ fun DetailsScreen(
                 )
                 DetailRow("Forum", row.forumName)
                 DetailRow("Size", SizeParser.formatBytes(row.sizeBytes))
+                val mediaInfo = remember(row.topicId) { MediaInfo.fromTitle(row.title, row.forumName) }
+                DetailRow("Format", mediaInfo.summary())
                 DetailRow("Seeds / Leechs", "${row.seeds} ↑ ${row.leechs} ↓")
                 DetailRow("Date", row.dateText)
                 DetailRow("Topic ID", "#${row.topicId}")

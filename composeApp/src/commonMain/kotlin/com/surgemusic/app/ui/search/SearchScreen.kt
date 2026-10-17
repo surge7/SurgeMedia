@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
@@ -31,7 +32,9 @@ import com.surgemusic.app.ui.components.CyberButton
 import com.surgemusic.app.ui.components.CyberPanel
 import com.surgemusic.app.ui.components.CyberTextButton
 import com.surgemusic.app.ui.components.CyberTextField
+import com.surgemusic.app.ui.components.MediaFormatChips
 import com.surgemusic.app.ui.components.cyberPanel
+import com.surgemusic.core.model.MediaInfo
 import com.surgemusic.core.model.SearchResultRow
 import com.surgemusic.core.model.SizeParser
 
@@ -182,6 +185,8 @@ private fun ResultRowItem(row: SearchResultRow, onShowDetails: (SearchResultRow)
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            val mediaInfo = remember(row.topicId) { MediaInfo.fromTitle(row.title, row.forumName) }
+            MediaFormatChips(mediaInfo, Modifier.padding(top = 4.dp))
         }
         Icon(
             imageVector = Icons.Rounded.ChevronRight,
