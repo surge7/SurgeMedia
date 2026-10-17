@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         AppContainer.startDownloadService()
+        AppContainer.healNetworkGate()
     }
 
     /**

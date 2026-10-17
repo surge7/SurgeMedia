@@ -2,10 +2,13 @@ package com.surgemusic.app
 
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.util.Log
 import com.surgemusic.app.downloads.DownloadService
 import com.surgemusic.app.downloads.MediaStoreCleaner
 import com.surgemusic.app.downloads.MediaStoreFinalizer
 import com.surgemusic.app.downloads.NetworkGate
+import com.surgemusic.app.downloads.isEffectivelyUnmetered
 import com.surgemusic.app.session.KeystoreSessionStore
 import com.surgemusic.app.session.SessionRepository
 import com.surgemusic.app.settings.SharedPreferencesStore
@@ -150,17 +153,37 @@ object AppContainer {
     /**
      * Registers the Wi-Fi gate once per process (MainActivity.onCreate).
      * Lost unmetered + Wi-Fi-only → pause all; regained → resume only gate-auto-paused items.
+     * Transitions are logged under "SurgeGate" for on-device diagnosis.
      */
     fun startNetworkGate() {
         if (!networkGateRegistered.compareAndSet(false, true)) return
         networkGate.register { hasUnmetered ->
+            Log.i(TAG, "unmetered=$hasUnmetered wifiOnly=${settings.wifiOnly.value}")
             if (!hasUnmetered && settings.wifiOnly.value) {
-                networkGate.pauseAndTrack { downloadManager.pauseAll() }
+                val paused = networkGate.pauseAndTrack { downloadManager.pauseAll() }
+                if (paused.isNotEmpty()) Log.i(TAG, "gate paused ${paused.size} item(s): $paused")
             } else if (hasUnmetered) {
-                networkGate.resumeAutoPaused { downloadManager.resume(it) }
+                val resumed = networkGate.resumeAutoPaused { downloadManager.resume(it) }
+                if (resumed.isNotEmpty()) Log.i(TAG, "gate resumed ${resumed.size} item(s): $resumed")
             }
         }
     }
 
+    /**
+     * Foreground heal (MainActivity.onResume): if the current default network is effectively
+     * unmetered, resume anything the gate auto-paused. Covers pauses fired on a transient
+     * capability snapshot with no subsequent unmetered callback (e.g. VPN reconnects).
+     */
+    fun healNetworkGate() {
+        if (!networkGateRegistered.get()) return
+        val manager = appContext.getSystemService(ConnectivityManager::class.java) ?: return
+        val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return
+        if (caps.isEffectivelyUnmetered()) {
+            val resumed = networkGate.resumeAutoPaused { downloadManager.resume(it) }
+            if (resumed.isNotEmpty()) Log.i(TAG, "gate heal resumed ${resumed.size} item(s)")
+        }
+    }
+
     private const val PREFS_SETTINGS = "surgemusic_settings"
+    private const val TAG = "SurgeGate"
 }
