@@ -4,6 +4,7 @@ import com.surgemusic.core.model.SearchResultPage
 import com.surgemusic.core.model.SearchResultRow
 import com.surgemusic.core.tracker.TrackerError
 import com.surgemusic.core.tracker.TrackerErrorKind
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -15,6 +16,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -142,5 +144,112 @@ class SearchViewModelTest {
         val state = assertIs<SearchUiState.Ready>(vm.uiState.value)
         assertTrue(state.hasMore)
         assertEquals(listOf(row(1), row(2)), vm.results.value)
+    }
+
+    @Test
+    fun seedsSortReordersSortedResultsWhileRawResultsKeepTrackerOrder() {
+        val page = SearchResultPage(
+            rows = listOf(row(1).copy(seeds = 3), row(2).copy(seeds = 30), row(3).copy(seeds = 10)),
+            start = 0,
+        )
+        val vm = SearchViewModel(searchFn = { _, _ -> Result.success(page) })
+
+        vm.onQueryChange("pink floyd")
+        vm.search()
+        vm.setSort(SearchSort.SEEDS)
+
+        assertEquals(listOf(2L, 3L, 1L), vm.sortedResults.value.map { it.topicId })
+        assertEquals(listOf(1L, 2L, 3L), vm.results.value.map { it.topicId }, "raw results stay in tracker order")
+    }
+
+    @Test
+    fun relevanceSortPreservesTrackerOrder() {
+        val page = SearchResultPage(rows = listOf(row(2).copy(seeds = 1), row(1).copy(seeds = 9)), start = 0)
+        val vm = SearchViewModel(searchFn = { _, _ -> Result.success(page) })
+
+        vm.onQueryChange("pink floyd")
+        vm.search()
+
+        assertEquals(listOf(2L, 1L), vm.sortedResults.value.map { it.topicId }, "default sort is tracker order")
+
+        vm.setSort(SearchSort.SEEDS) // toggle away and back: RELEVANCE must restore original order
+        vm.setSort(SearchSort.RELEVANCE)
+        assertEquals(listOf(2L, 1L), vm.sortedResults.value.map { it.topicId })
+    }
+
+    @Test
+    fun seedsSortPersistsAcrossLoadMore() {
+        val pages = mapOf(
+            0 to SearchResultPage(rows = listOf(row(1).copy(seeds = 3), row(2).copy(seeds = 10)), start = 0),
+            2 to SearchResultPage(rows = listOf(row(3).copy(seeds = 30)), start = 2),
+        )
+        val vm = SearchViewModel(searchFn = { _, start -> Result.success(pages.getValue(start)) })
+
+        vm.onQueryChange("pink floyd")
+        vm.search()
+        vm.setSort(SearchSort.SEEDS)
+        assertEquals(listOf(2L, 1L), vm.sortedResults.value.map { it.topicId })
+
+        vm.loadMore()
+
+        assertIs<SearchUiState.Ready>(vm.uiState.value)
+        assertEquals(listOf(1L, 2L, 3L), vm.results.value.map { it.topicId }, "raw pages append in tracker order")
+        assertEquals(
+            listOf(3L, 2L, 1L),
+            vm.sortedResults.value.map { it.topicId },
+            "appended page is merged and re-sorted: its high-seed row comes first",
+        )
+    }
+
+    @Test
+    fun dateSortParsesRutrackerDatesAndSinksUnparseableLast() {
+        assertEquals(2_026_1002L, parseRutrackerDate("2-Окт-26"))
+        assertEquals(2_026_0228L, parseRutrackerDate("28-Фев-26"))
+        assertEquals(2_026_0228L, parseRutrackerDate("28-feb-26"), "Latin month aliases are case-insensitive")
+        assertEquals(Long.MAX_VALUE, parseRutrackerDate("Сегодня"))
+        assertEquals(Long.MAX_VALUE - 1, parseRutrackerDate("Вчера"))
+        assertNull(parseRutrackerDate("soon"))
+
+        val page = SearchResultPage(
+            rows = listOf(
+                row(1).copy(dateText = "2-Окт-26"),
+                row(2).copy(dateText = "28-Фев-26"),
+                row(3).copy(dateText = "soon"),
+            ),
+            start = 0,
+        )
+        val vm = SearchViewModel(searchFn = { _, _ -> Result.success(page) })
+
+        vm.onQueryChange("pink floyd")
+        vm.search()
+        vm.setSort(SearchSort.DATE)
+
+        assertEquals(
+            listOf(1L, 2L, 3L),
+            vm.sortedResults.value.map { it.topicId },
+            "2-Окт-26 sorts above 28-Фев-26; the unparseable dateText sinks last",
+        )
+    }
+
+    @Test
+    fun setSortDuringLoadingDoesNotBreakSubsequentReadyState() {
+        val gate = CompletableDeferred<Unit>()
+        val vm = SearchViewModel(
+            searchFn = { _, _ ->
+                gate.await() // hold the search in Loading until the test releases it
+                Result.success(SearchResultPage(rows = listOf(row(1).copy(seeds = 99)), start = 0))
+            },
+        )
+
+        vm.onQueryChange("pink floyd")
+        vm.search() // runs unconfined until gate.await() suspends
+
+        assertIs<SearchUiState.Loading>(vm.uiState.value)
+        vm.setSort(SearchSort.SEEDS) // safe mid-flight: sortedResults just re-sorts the empty list
+
+        gate.complete(Unit)
+
+        assertIs<SearchUiState.Ready>(vm.uiState.value)
+        assertEquals(listOf(1L), vm.sortedResults.value.map { it.topicId }, "sortedResults updates once results land")
     }
 }

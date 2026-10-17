@@ -58,6 +58,8 @@ fun SearchScreen(
 ) {
     val query by viewModel.query.collectAsState()
     val results by viewModel.results.collectAsState()
+    val sort by viewModel.sort.collectAsState()
+    val sorted by viewModel.sortedResults.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
 
     Column(
@@ -87,6 +89,14 @@ fun SearchScreen(
             )
         }
 
+        if (uiState is SearchUiState.Ready && results.isNotEmpty()) {
+            SortBar(
+                current = sort,
+                onSelect = viewModel::setSort,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+
         when (val state = uiState) {
             SearchUiState.Idle -> Hint("Type a query to search rutracker music forums.")
             SearchUiState.Loading -> CircularProgressIndicator(Modifier.padding(top = 16.dp))
@@ -101,7 +111,7 @@ fun SearchScreen(
                             .weight(1f)
                             .imePadding(),
                     ) {
-                        items(results, key = { it.topicId }) { row ->
+                        items(sorted, key = { it.topicId }) { row ->
                             ResultRowItem(row = row, onShowDetails = onShowDetails)
                         }
                         if (state.hasMore) {

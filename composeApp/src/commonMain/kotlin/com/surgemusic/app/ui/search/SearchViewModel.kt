@@ -8,8 +8,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /** Search screen state machine (plan Task 6). */
@@ -18,6 +21,43 @@ sealed interface SearchUiState {
     data object Loading : SearchUiState
     data class Ready(val hasMore: Boolean) : SearchUiState
     data class Error(val message: String, val needsLogin: Boolean) : SearchUiState
+}
+
+/** Client-side sort modes for loaded search results (no server-side `o=`/`s=` params). */
+enum class SearchSort(val label: String) {
+    RELEVANCE("Relevance"), SEEDS("Seeds"), SIZE("Size"), DATE("Date"), TITLE("Title")
+}
+
+/** 3-letter month abbreviations (Russian first, Latin aliases) → month number; matched lowercased. */
+private val MONTHS: Map<String, Int> = buildMap {
+    listOf("Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек")
+        .forEachIndexed { i, m -> put(m.lowercase(), i + 1) }
+    listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+        .forEachIndexed { i, m -> put(m.lowercase(), i + 1) }
+}
+
+/**
+ * Pure commonMain date key for rutracker's `dateText` column (`d-MMM-yy`, Russian 3-letter
+ * months like `2-Окт-26`; Latin `Jan`..`Dec` accepted case-insensitively; 2-digit year → 20yy).
+ * Returns a comparable `y*10000 + m*100 + d` Long, with `Сегодня`/`Вчера` pinned above every
+ * real date, or `null` when nothing parses (callers sink those rows to the bottom).
+ */
+internal fun parseRutrackerDate(text: String): Long? {
+    val t = text.trim()
+    return when (t.lowercase()) {
+        "сегодня" -> Long.MAX_VALUE
+        "вчера" -> Long.MAX_VALUE - 1
+        else -> {
+            val parts = t.split("-")
+            if (parts.size != 3) return null
+            val day = parts[0].toIntOrNull() ?: return null
+            val month = MONTHS[parts[1].lowercase()] ?: return null
+            val rawYear = parts[2].toIntOrNull() ?: return null
+            if (day !in 1..31 || rawYear < 0) return null
+            val year = if (rawYear < 100) 2000 + rawYear else rawYear
+            year * 10_000L + month * 100L + day
+        }
+    }
 }
 
 /**
@@ -44,6 +84,18 @@ class SearchViewModel(
     private val _results = MutableStateFlow<List<SearchResultRow>>(emptyList())
     val results: StateFlow<List<SearchResultRow>> = _results.asStateFlow()
 
+    private val _sort = MutableStateFlow(SearchSort.RELEVANCE)
+    val sort: StateFlow<SearchSort> = _sort.asStateFlow()
+
+    /**
+     * [results] re-sorted client-side by the current [SearchSort]; [results] itself stays in
+     * raw tracker (relevance) order as pages append. RELEVANCE keeps that original order
+     * because `sortedWith` is stable and its comparator reports all rows equal.
+     */
+    val sortedResults: StateFlow<List<SearchResultRow>> =
+        combine(results, _sort) { rows, sort -> rows.sortedWith(comparatorFor(sort)) }
+            .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
     private val _uiState = MutableStateFlow<SearchUiState>(SearchUiState.Idle)
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
 
@@ -56,6 +108,11 @@ class SearchViewModel(
 
     fun onQueryChange(value: String) {
         _query.value = value
+    }
+
+    /** Switch the client-side sort; [sortedResults] recomputes over already-loaded pages, no re-fetch. */
+    fun setSort(s: SearchSort) {
+        _sort.value = s
     }
 
     fun search() {
@@ -112,5 +169,16 @@ class SearchViewModel(
     private fun Throwable.toErrorState(): SearchUiState.Error {
         val needsLogin = this is TrackerError && kind == TrackerErrorKind.AUTH
         return SearchUiState.Error(message = message ?: "search failed", needsLogin = needsLogin)
+    }
+
+    /** Stable comparators; equal keys fall back to [SearchResultRow.topicId] ascending. */
+    private fun comparatorFor(sort: SearchSort): Comparator<SearchResultRow> = when (sort) {
+        // All-equal comparator: `sortedWith` is stable, so the tracker (relevance) order survives.
+        SearchSort.RELEVANCE -> Comparator { _, _ -> 0 }
+        SearchSort.SEEDS -> compareByDescending<SearchResultRow> { it.seeds }.thenBy { it.topicId }
+        SearchSort.SIZE -> compareByDescending<SearchResultRow> { it.sizeBytes }.thenBy { it.topicId }
+        SearchSort.DATE -> compareByDescending<SearchResultRow> { parseRutrackerDate(it.dateText) ?: Long.MIN_VALUE }
+            .thenBy { it.topicId }
+        SearchSort.TITLE -> compareBy<SearchResultRow> { it.title.lowercase() }.thenBy { it.topicId }
     }
 }

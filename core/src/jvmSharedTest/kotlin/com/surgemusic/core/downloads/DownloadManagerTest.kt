@@ -243,7 +243,6 @@ class DownloadManagerTest {
     }
 
     @Test
-    @Test
     fun duplicateEnqueueWhileInFlightIsIgnored() = runBlocking {
         val engine = FakeEngine()
         val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
