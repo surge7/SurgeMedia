@@ -34,6 +34,13 @@ internal object MediaFiles {
     }
 
     /**
+     * Album-dir name from a torrent title: filesystem/MediaStore-illegal characters
+     * become `_`. Shared by the finalizer (where files land) and `MediaStoreCleaner`
+     * (which must match the exact same dir to delete them).
+     */
+    internal fun sanitizeDirName(title: String): String = title.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
+
+    /**
      * MediaStore [MediaStore.MediaColumns.RELATIVE_PATH] for the given collection kind.
      *
      * Android enforces collection-specific root dirs: audio may live under `Music/…`
@@ -111,5 +118,5 @@ class MediaStoreFinalizer(private val context: Context) {
             }
         }
 
-    private fun sanitize(s: String) = s.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
+    private fun sanitize(s: String) = MediaFiles.sanitizeDirName(s)
 }

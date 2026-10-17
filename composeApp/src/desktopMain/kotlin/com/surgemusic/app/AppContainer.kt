@@ -1,5 +1,6 @@
 package com.surgemusic.app
 
+import com.surgemusic.app.downloads.DesktopFileCleaner
 import com.surgemusic.app.downloads.DesktopFinalizer
 import com.surgemusic.app.session.FileSessionStore
 import com.surgemusic.app.session.SessionRepository
@@ -89,8 +90,8 @@ object AppContainer {
         )
     }
 
-    /** Downloads view model for the Downloads tab. */
-    val downloadsViewModel: DownloadsViewModel by lazy { DownloadsViewModel(downloadManager) }
+    /** Downloads view model for the Downloads tab (file deletion via DesktopFileCleaner). */
+    val downloadsViewModel: DownloadsViewModel by lazy { DownloadsViewModel(downloadManager, DesktopFileCleaner) }
 
     /**
      * Settings view model for the Settings tab: session management + manual import over
