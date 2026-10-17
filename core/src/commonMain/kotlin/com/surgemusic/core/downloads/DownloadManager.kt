@@ -60,15 +60,33 @@ class DownloadManager(
     private val activeStates =
         setOf(DownloadState.QUEUED, DownloadState.DOWNLOADING, DownloadState.PAUSED)
 
+    private val terminalStates =
+        setOf(DownloadState.DONE, DownloadState.FAILED, DownloadState.CANCELLED)
+
     init {
         scope.launch {
             engine.events.collect { onEngineEvent(it) }
         }
     }
 
+    /**
+     * Queues [request] for download. Idempotent per id: a duplicate enqueue while the
+     * item is still in flight (QUEUED/DOWNLOADING/PAUSED/FINALIZING — e.g. the user
+     * tapping Download again) is ignored; re-enqueueing a terminal item (DONE/FAILED/
+     * CANCELLED) resets it to a fresh QUEUED item for a re-download. Two items with the
+     * same id can never coexist — the UI lists items keyed by id and crashes on dupes.
+     */
     fun enqueue(request: DownloadRequest, torrentBytes: ByteArray, stagingDir: String) {
+        val existing = _items.value.firstOrNull { it.request.id == request.id }
+        if (existing != null && existing.state !in terminalStates) return
         staged.update { it + (request.id to StagedStart(torrentBytes, stagingDir)) }
-        _items.update { it + DownloadItem(request) }
+        _items.update { list ->
+            if (existing != null) {
+                list.map { if (it.request.id == request.id) DownloadItem(request) else it }
+            } else {
+                list + DownloadItem(request)
+            }
+        }
         pump()
     }
 
@@ -142,7 +160,16 @@ class DownloadManager(
                 mutateIf(next.request.id, guard = { it.state == DownloadState.QUEUED }) {
                     it.copy(state = DownloadState.DOWNLOADING)
                 }
-            if (claimed) engine.start(next.request.id, start.torrentBytes, start.stagingDir)
+            if (claimed) {
+                // start() only schedules work on the engine's own IO scope (no caller-thread
+                // blocking), and a synchronous throw (fake/real engine rejecting the args)
+                // becomes a FAILED item instead of escaping into the enqueue caller.
+                try {
+                    engine.start(next.request.id, start.torrentBytes, start.stagingDir)
+                } catch (t: Throwable) {
+                    onEngineEvent(EngineEvent.Failed(next.request.id, t.message ?: "engine start failed"))
+                }
+            }
         }
     }
 

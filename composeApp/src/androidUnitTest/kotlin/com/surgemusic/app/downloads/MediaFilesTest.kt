@@ -122,4 +122,33 @@ class MediaFilesTest {
         )
         assertEquals("Music/SurgeMusic/", path)
     }
+
+    @Test
+    fun videoExtensionsClassifyAsVideoWithContainerMime() {
+        val expected = mapOf(
+            "mkv" to "video/x-matroska", "mp4" to "video/mp4", "m4v" to "video/mp4",
+            "webm" to "video/webm", "avi" to "video/x-msvideo", "mov" to "video/quicktime",
+            "ts" to "video/mp2t", "m2ts" to "video/mp2t", "mpg" to "video/mp2t",
+            "mpeg" to "video/mp2t", "vob" to "video/mpeg", "wmv" to "video/x-ms-wmv",
+            "flv" to "video/x-flv", "3gp" to "video/3gpp",
+        )
+        expected.forEach { (ext, mime) ->
+            assertEquals(
+                "video" to mime,
+                MediaFiles.classifyFile("concert.$ext"),
+                "extension $ext should classify as video with $mime",
+            )
+        }
+    }
+
+    @Test
+    fun videosGoToMoviesRoot() {
+        val dir = MediaFiles.relativePathFor(
+            MediaFiles.KIND_VIDEO,
+            "Pink Floyd - Pompeii",
+            null,
+            File("/torrent"),
+        )
+        assertEquals("Movies/SurgeMusic/Pink Floyd - Pompeii/", dir)
+    }
 }

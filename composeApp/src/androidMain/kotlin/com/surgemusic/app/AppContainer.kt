@@ -119,7 +119,7 @@ object AppContainer {
      * the Search tab surfaces them as a snackbar.
      */
     suspend fun download(row: SearchResultRow): Result<Unit> =
-        trackerClient().torrentFile(row.topicId).map { torrent ->
+        trackerClient().torrentFile(row.topicId).mapCatching { torrent ->
             val staging = File(appContext.getExternalFilesDir("staging"), row.topicId.toString())
                 .absolutePath
             downloadManager.enqueue(

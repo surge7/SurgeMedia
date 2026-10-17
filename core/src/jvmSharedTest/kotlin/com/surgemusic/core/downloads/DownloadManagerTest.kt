@@ -241,4 +241,45 @@ class DownloadManagerTest {
         assertEquals(DownloadState.QUEUED, item(manager, "t-c").state)
         assertEquals(setOf("t-a", "t-b"), engine.paused.value.toSet())
     }
+
+    @Test
+    fun duplicateEnqueueWhileInFlightIsIgnored() = runBlocking {
+        val engine = FakeEngine()
+        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1")
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1") // second tap while DOWNLOADING
+
+        assertEquals(1, manager.items.value.count { it.request.id == "t-1" })
+        assertEquals(1, engine.started.value.size)
+        assertEquals(DownloadState.DOWNLOADING, item(manager, "t-1").state)
+    }
+
+    @Test
+    fun reEnqueueAfterFailureResetsItemAndRestarts() = runBlocking {
+        val engine = FakeEngine()
+        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1")
+        assertTrue(engine.events.tryEmit(EngineEvent.Failed("t-1", "tracker dead")))
+        awaitItem(manager, "t-1") { it.state == DownloadState.FAILED }
+
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1") // retry same topic
+
+        assertEquals(1, manager.items.value.count { it.request.id == "t-1" })
+        awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+        assertEquals(2, engine.started.value.size)
+    }
+
+    @Test
+    fun throwingEngineStartFailsItemInsteadOfCrashingCaller() = runBlocking {
+        val engine = FakeEngine().apply { throwOnStart = IllegalStateException("bad torrent bytes") }
+        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1")
+
+        val failed = awaitItem(manager, "t-1") { it.state == DownloadState.FAILED }
+        assertEquals("bad torrent bytes", failed.error)
+    }
 }

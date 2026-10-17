@@ -18,6 +18,9 @@ class FakeEngine : TorrentEngine {
 
     data class StartCall(val id: String, val torrentBytes: ByteArray, val targetDir: String)
 
+    /** When set, [start] throws this instead of recording — proves callers survive a rejecting engine. */
+    @Volatile var throwOnStart: RuntimeException? = null
+
     override val events = MutableSharedFlow<EngineEvent>(extraBufferCapacity = 256)
 
     private val _started = MutableStateFlow<List<StartCall>>(emptyList())
@@ -30,6 +33,7 @@ class FakeEngine : TorrentEngine {
     val cancelled: StateFlow<List<String>> = _cancelled.asStateFlow()
 
     override fun start(id: String, torrentBytes: ByteArray, targetDir: String) {
+        throwOnStart?.let { throw it }
         _started.value += StartCall(id, torrentBytes, targetDir)
     }
 

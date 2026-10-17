@@ -1,9 +1,12 @@
 package com.surgemusic.core.engine.jvm
 
+import com.frostwire.jlibtorrent.AlertListener
 import com.frostwire.jlibtorrent.SessionManager
 import com.frostwire.jlibtorrent.TorrentHandle
 import com.frostwire.jlibtorrent.TorrentInfo
 import com.frostwire.jlibtorrent.TorrentStatus
+import com.frostwire.jlibtorrent.alerts.Alert
+import com.frostwire.jlibtorrent.alerts.AlertType
 import com.frostwire.jlibtorrent.swig.address
 import com.frostwire.jlibtorrent.swig.error_code
 import com.frostwire.jlibtorrent.swig.libtorrent
@@ -39,6 +42,27 @@ class JLibTorrentEngine : TorrentEngine {
 
     init {
         session.start()
+        // Observability: libtorrent failure alerts (web-seed/tracker/peer/file errors)
+        // previously vanished silently — a torrent stuck at 0% had no diagnosable trace.
+        // stdout lands in logcat under System.out for both Android and desktop runs.
+        session.addListener(object : AlertListener {
+            override fun types(): IntArray = intArrayOf(
+                AlertType.TORRENT_ERROR.swig(),
+                AlertType.URL_SEED.swig(),
+                AlertType.TRACKER_ERROR.swig(),
+                AlertType.TRACKER_WARNING.swig(),
+                AlertType.PEER_ERROR.swig(),
+                AlertType.FILE_ERROR.swig(),
+                AlertType.LISTEN_FAILED.swig(),
+                AlertType.DHT_ERROR.swig(),
+                AlertType.SESSION_ERROR.swig(),
+                AlertType.STORAGE_MOVED_FAILED.swig(),
+            )
+
+            override fun alert(alert: Alert<*>) {
+                println("JLibTorrentEngine alert: ${alert.message()}")
+            }
+        })
         scope.launch {
             while (isActive) {
                 active.forEach { (id, _) -> sampleStatus(id) }
@@ -91,11 +115,36 @@ class JLibTorrentEngine : TorrentEngine {
         targetDir: String,
         extraPeers: List<Pair<String, Int>>,
     ) {
-        val info = TorrentInfo(torrentBytes)
-        val dir = File(targetDir).apply { mkdirs() }
-        active[id] = Active(info, null)
-        session.download(info, dir)
-        scope.launch { // wait for the handle to appear
+        // Parse + add on the engine's IO scope: callers may be on any thread (incl.
+        // Android's Main), and TorrentInfo parsing / directory setup must neither block
+        // nor throw through them. Failures surface as EngineEvent.Failed for the id.
+        scope.launch {
+            val info = try {
+                TorrentInfo(torrentBytes)
+            } catch (t: Throwable) {
+                _events.tryEmit(
+                    EngineEvent.Failed(id, "invalid torrent: ${t.message ?: t::class.simpleName}"),
+                )
+                return@launch
+            }
+            val dir = try {
+                File(targetDir).apply { mkdirs() }
+            } catch (t: Throwable) {
+                _events.tryEmit(
+                    EngineEvent.Failed(id, "staging dir unusable: ${t.message ?: t::class.simpleName}"),
+                )
+                return@launch
+            }
+            active[id] = Active(info, null)
+            try {
+                session.download(info, dir)
+            } catch (t: Throwable) {
+                active.remove(id)
+                _events.tryEmit(
+                    EngineEvent.Failed(id, "session rejected torrent: ${t.message ?: t::class.simpleName}"),
+                )
+                return@launch
+            }
             val deadline = System.currentTimeMillis() + 20_000
             while (active[id]?.handle == null && System.currentTimeMillis() < deadline) {
                 // jlibtorrent 2.0.12.9 has no TorrentInfo.infoHash(); the test torrents

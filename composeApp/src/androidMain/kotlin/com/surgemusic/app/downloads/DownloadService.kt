@@ -31,7 +31,11 @@ import kotlinx.coroutines.launch
  */
 class DownloadService : Service() {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    // Default dispatcher: touching `AppContainer.downloadManager` lazily boots the native
+    // torrent session (JLibTorrentEngine) — that must never run on the main thread
+    // (onStartCommand is Main; a native session start there freezes the UI at every
+    // app resume). NotificationManager.notify is thread-safe off-main.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var observer: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -52,15 +56,20 @@ class DownloadService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 5-second rule: go foreground immediately, before anything else can fail.
+        // The initial notification is built from an EMPTY item list on purpose — reading
+        // the real list would synchronously boot the torrent engine on Main (see scope).
+        // The observer below replaces it with live numbers within one emission.
         // 3-arg overload (API 29+) pins the manifest-declared `dataSync` type explicitly
         // (required shape on targetSdk 34+).
         startForeground(
             NOTIFICATION_ID,
-            buildNotification(AppContainer.downloadManager.items.value),
+            buildNotification(emptyList()),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
         )
         observeItems()
-        if (intent?.action == ACTION_PAUSE_ALL) AppContainer.downloadManager.pauseAll()
+        if (intent?.action == ACTION_PAUSE_ALL) {
+            scope.launch { AppContainer.downloadManager.pauseAll() }
+        }
         return START_STICKY
     }
 

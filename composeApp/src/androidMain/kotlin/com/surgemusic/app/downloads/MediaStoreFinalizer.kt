@@ -16,9 +16,31 @@ import java.io.File
 internal object MediaFiles {
     val audioExt = setOf("flac", "mp3", "ogg", "oga", "wav", "m4a", "aac", "ape", "wv", "opus")
     val imageExt = setOf("jpg", "jpeg", "png", "webp")
+    val videoExt = setOf(
+        "mkv", "mp4", "m4v", "webm", "avi", "mov", "ts", "m2ts", "mpg", "mpeg", "vob", "wmv", "flv", "3gp",
+    )
 
     const val KIND_AUDIO = "audio"
     const val KIND_IMAGE = "image"
+    const val KIND_VIDEO = "video"
+
+    /** Correct container mimes for MediaStore.Video (a bare `video/<ext>` would be invalid). */
+    internal val videoMimes = mapOf(
+        "mkv" to "video/x-matroska",
+        "mp4" to "video/mp4",
+        "m4v" to "video/mp4",
+        "webm" to "video/webm",
+        "avi" to "video/x-msvideo",
+        "mov" to "video/quicktime",
+        "ts" to "video/mp2t",
+        "m2ts" to "video/mp2t",
+        "mpg" to "video/mp2t",
+        "mpeg" to "video/mp2t",
+        "vob" to "video/mpeg",
+        "wmv" to "video/x-ms-wmv",
+        "flv" to "video/x-flv",
+        "3gp" to "video/3gpp",
+    )
 
     /**
      * (collectionKind, mime) for a staged file, or null for non-media files
@@ -29,6 +51,7 @@ internal object MediaFiles {
         return when (ext) {
             in audioExt -> KIND_AUDIO to "audio/$ext"
             in imageExt -> KIND_IMAGE to "image/$ext"
+            in videoExt -> KIND_VIDEO to (videoMimes[ext] ?: "video/mp4")
             else -> null
         }
     }
@@ -40,11 +63,16 @@ internal object MediaFiles {
      * but images may only live under `Pictures/`, `DCIM/`, `Download/`… — a `Music/…`
      * path on the Images collection throws and (before this was per-file-isolated)
      * failed the whole finalize after the audio had already copied. Cover art therefore
-     * lands in `Pictures/SurgeMusic/<album>/` (verified on emulator 2026-10-12).
+     * lands in `Pictures/SurgeMusic/<album>/` (verified on emulator 2026-10-12), video
+     * in `Movies/SurgeMusic/<album>/` (same collection-root rule for Video).
      */
     internal fun relativePathFor(kind: String, albumDir: String, fileDir: File?, torrentDir: File): String {
         val sub = fileDir?.toRelativeString(torrentDir) ?: ""
-        val rootDir = if (kind == KIND_AUDIO) "Music/SurgeMusic" else "Pictures/SurgeMusic"
+        val rootDir = when (kind) {
+            KIND_AUDIO -> "Music/SurgeMusic"
+            KIND_IMAGE -> "Pictures/SurgeMusic"
+            else -> "Movies/SurgeMusic"
+        }
         val path = "$rootDir/$albumDir/$sub".replace("//", "/")
         return if (path.endsWith("/")) path else "$path/"
     }
@@ -67,6 +95,7 @@ class MediaStoreFinalizer(private val context: Context) {
                 val albumDir = sanitize(item.request.title).take(120)
                 var copied = 0
                 val failedFiles = mutableListOf<String>()
+                val rootsWritten = linkedSetOf<String>() // public roots files actually landed in
                 torrentDir
                     .walkTopDown()
                     .filter { it.isFile }
@@ -81,6 +110,8 @@ class MediaStoreFinalizer(private val context: Context) {
                                     MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                                 MediaFiles.KIND_IMAGE ->
                                     MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                                MediaFiles.KIND_VIDEO ->
+                                    MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                                 else -> return@forEach
                             }
                             val values = ContentValues().apply {
@@ -99,13 +130,22 @@ class MediaStoreFinalizer(private val context: Context) {
                             }
                             val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
                             context.contentResolver.update(uri, done, null, null)
+                            rootsWritten += when (kind) {
+                                MediaFiles.KIND_AUDIO -> "Music/SurgeMusic"
+                                MediaFiles.KIND_IMAGE -> "Pictures/SurgeMusic"
+                                else -> "Movies/SurgeMusic"
+                            }
                         }.isSuccess
                         if (ok) copied++ else failedFiles.add(f.name)
                     }
                 root.deleteRecursively()
                 require(copied > 0) { "no files finalized${if (failedFiles.isNotEmpty()) "; failed: $failedFiles" else ""}" }
                 buildString {
-                    append("$copied files → Music/SurgeMusic/$albumDir")
+                    append(
+                        "$copied files → " +
+                            if (rootsWritten.size == 1) "${rootsWritten.first()}/$albumDir"
+                            else rootsWritten.joinToString(),
+                    )
                     if (failedFiles.isNotEmpty()) append(" (skipped: ${failedFiles.joinToString()})")
                 }
             }
