@@ -3,6 +3,7 @@ package com.surgemusic.app
 import android.content.Context
 import android.content.Intent
 import com.surgemusic.app.downloads.DownloadService
+import com.surgemusic.app.downloads.MediaStoreCleaner
 import com.surgemusic.app.downloads.MediaStoreFinalizer
 import com.surgemusic.app.downloads.NetworkGate
 import com.surgemusic.app.session.KeystoreSessionStore
@@ -96,8 +97,8 @@ object AppContainer {
         )
     }
 
-    /** Downloads view model for the Downloads tab (Task 8). */
-    val downloadsViewModel: DownloadsViewModel by lazy { DownloadsViewModel(downloadManager) }
+    /** Downloads view model for the Downloads tab (Task 8; file deletion via MediaStore). */
+    val downloadsViewModel: DownloadsViewModel by lazy { DownloadsViewModel(downloadManager, MediaStoreCleaner(appContext)) }
 
     /**
      * Settings view model for the Settings tab (Task 9): session management + manual import

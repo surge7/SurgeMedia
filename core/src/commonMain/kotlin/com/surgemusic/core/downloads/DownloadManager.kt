@@ -132,6 +132,41 @@ class DownloadManager(
         paused.forEach { engine.pause(it) }
     }
 
+    /**
+     * History removal: drops [id] from the list and from `staged`. An active item is
+     * first cancelled exactly like [cancel] does (state CANCELLED + engine.cancel +
+     * pump) so the engine side is torn down too; terminal items (and one still
+     * FINALIZING — its finalize keeps running but the entry is gone) are dropped
+     * directly. Unknown id is a no-op.
+     */
+    fun remove(id: String) {
+        val current = _items.value.firstOrNull { it.request.id == id } ?: return
+        if (current.state in activeStates) {
+            val cancelled = mutateIf(id, guard = { it.state in activeStates }) {
+                it.copy(state = DownloadState.CANCELLED)
+            }
+            if (cancelled) {
+                engine.cancel(id)
+                pump()
+            }
+        }
+        _items.update { list -> list.filterNot { it.request.id == id } }
+        staged.update { it - id }
+    }
+
+    /**
+     * History cleanup: drops every terminal item (DONE/FAILED/CANCELLED) and its
+     * `staged` entry; active items are untouched.
+     */
+    fun clearCompleted() {
+        val terminal = _items.value
+            .filter { it.state in terminalStates }
+            .mapTo(mutableSetOf()) { it.request.id }
+        if (terminal.isEmpty()) return
+        _items.update { list -> list.filterNot { it.request.id in terminal } }
+        staged.update { it - terminal }
+    }
+
     /** Starts queued items while free slots remain; called after every state change. */
     private fun pump() {
         if (!pumpMutex.tryLock()) {

@@ -243,6 +243,7 @@ class DownloadManagerTest {
     }
 
     @Test
+    @Test
     fun duplicateEnqueueWhileInFlightIsIgnored() = runBlocking {
         val engine = FakeEngine()
         val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
@@ -281,5 +282,78 @@ class DownloadManagerTest {
 
         val failed = awaitItem(manager, "t-1") { it.state == DownloadState.FAILED }
         assertEquals("bad torrent bytes", failed.error)
+    }
+
+    @Test
+    fun removeDoneItemDropsItAndKeepsOthers() = runBlocking {
+        val engine = FakeEngine()
+        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+        manager.enqueue(request("t-a"), torrent, "/staging/t-a")
+        manager.enqueue(request("t-b"), torrent, "/staging/t-b")
+        assertTrue(engine.events.tryEmit(EngineEvent.Completed("t-a")))
+        assertTrue(engine.events.tryEmit(EngineEvent.Completed("t-b")))
+        awaitItem(manager, "t-a") { it.state == DownloadState.DONE }
+        awaitItem(manager, "t-b") { it.state == DownloadState.DONE }
+
+        manager.remove("t-a")
+
+        assertEquals(listOf("t-b"), manager.items.value.map { it.request.id })
+        assertEquals(DownloadState.DONE, item(manager, "t-b").state)
+        assertTrue(engine.cancelled.value.isEmpty(), "removing a terminal item must not cancel anything")
+    }
+
+    @Test
+    fun removeDownloadingItemCancelsItAndDropsIt() = runBlocking {
+        val engine = FakeEngine()
+        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1")
+        awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+
+        manager.remove("t-1")
+
+        assertTrue(engine.cancelled.value.contains("t-1"), "removing an active item must cancel the engine side")
+        assertTrue(manager.items.value.none { it.request.id == "t-1" })
+    }
+
+    @Test
+    fun clearCompletedKeepsActiveAndDropsTerminalItems() = runBlocking {
+        val engine = FakeEngine()
+        val manager = DownloadManager(engine, 2) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+        // a, b take the 2 slots; c, d, e stay QUEUED
+        listOf("t-a", "t-b", "t-c", "t-d", "t-e").forEach { manager.enqueue(request(it), torrent, "/staging/$it") }
+        assertTrue(engine.events.tryEmit(EngineEvent.Completed("t-a")))
+        awaitItem(manager, "t-a") { it.state == DownloadState.DONE }
+        assertTrue(engine.events.tryEmit(EngineEvent.Failed("t-b", "boom")))
+        awaitItem(manager, "t-b") { it.state == DownloadState.FAILED }
+        manager.cancel("t-e") // QUEUED is active → CANCELLED; that slot's pump has nothing queued left
+        assertEquals(DownloadState.CANCELLED, item(manager, "t-e").state)
+        awaitItem(manager, "t-c") { it.state == DownloadState.DOWNLOADING }
+        awaitItem(manager, "t-d") { it.state == DownloadState.DOWNLOADING }
+
+        manager.clearCompleted()
+
+        val after = manager.items.value
+        assertEquals(setOf("t-c", "t-d"), after.map { it.request.id }.toSet())
+        assertTrue(after.all { it.state == DownloadState.DOWNLOADING }, "active items must survive: ${after.map { it.state }}")
+        assertTrue(engine.cancelled.value.contains("t-e") && !engine.cancelled.value.contains("t-c"))
+    }
+
+    @Test
+    fun removeUnknownIdIsNoOp() = runBlocking {
+        val engine = FakeEngine()
+        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1")
+        awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+        val before = manager.items.value
+
+        manager.remove("nope")
+        manager.clearCompleted() // only t-1 exists and it is active → also a no-op here
+
+        assertEquals(before, manager.items.value)
+        assertTrue(engine.cancelled.value.isEmpty())
     }
 }
