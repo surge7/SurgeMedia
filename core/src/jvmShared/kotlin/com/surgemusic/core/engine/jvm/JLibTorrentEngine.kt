@@ -31,6 +31,11 @@ import kotlin.concurrent.Volatile
 
 class JLibTorrentEngine : TorrentEngine {
 
+    private companion object {
+        /** Tracker-shim re-announce cadence (trackers default to 30–60 min; be eager). */
+        const val ANNOUNCE_INTERVAL_MS = 180_000L
+    }
+
     private val session = SessionManager()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _events = MutableSharedFlow<EngineEvent>(extraBufferCapacity = 256)
@@ -97,6 +102,42 @@ class JLibTorrentEngine : TorrentEngine {
         }
     }
 
+    /**
+     * Tracker announce shim (see [TrackerAnnouncer]): under Android per-app VPNs
+     * libtorrent's own announces never go out (native DNS/route enumeration fail on
+     * tun0), so announce via Ktor/OkHttp and connect the returned peers directly.
+     * Re-announces every [ANNOUNCE_INTERVAL_MS] while the torrent is active and
+     * unfinished; the loop exits on cancel/remove/completion (active[id] gone).
+     */
+    private fun announceTrackers(id: String, info: TorrentInfo, handle: TorrentHandle) {
+        val urls = runCatching { info.trackers().map { it.url() } }.getOrDefault(emptyList())
+            .filter { it.startsWith("http") }
+        if (urls.isEmpty()) return
+        scope.launch {
+            val announcer = TrackerAnnouncer()
+            val infoHash = info.infoHashV1().toString()
+            val total = runCatching { info.totalSize() }.getOrDefault(0L)
+            var started = true
+            while (active[id]?.handle != null && id !in completed) {
+                urls.forEach { url ->
+                    val peers = announcer.announceOnce(
+                        announceUrl = url,
+                        infoHashHex = infoHash,
+                        listenPort = listenPort(),
+                        leftBytes = total,
+                        started = started,
+                    )
+                    if (peers != null) {
+                        println("JLibTorrentEngine tracker-shim: $url → ${peers.size} peer(s)")
+                        peers.forEach { (ip, port) -> addPeer(handle, ip, port) }
+                    }
+                }
+                started = false
+                delay(ANNOUNCE_INTERVAL_MS)
+            }
+        }
+    }
+
     // jlibtorrent 2.0.12.9: no SessionManager.listenPort(); the swig session_handle
     // exposes listen_port().
     override fun listenPort(): Int = session.swig().listen_port()
@@ -154,6 +195,7 @@ class JLibTorrentEngine : TorrentEngine {
                     active[id]?.handle = h
                     _events.tryEmit(EngineEvent.Added(id))
                     extraPeers.forEach { (ip, port) -> addPeer(h, ip, port) }
+                    announceTrackers(id, info, h)
                     // First status sample immediately (mirrors the Phase-1 flow's first
                     // Progress): a torrent that finishes entirely between 1s poll ticks
                     // would otherwise emit no Progress at all.
