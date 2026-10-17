@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -30,9 +31,11 @@ import androidx.compose.ui.unit.dp
 import com.surgemusic.app.ui.components.CyberChip
 import com.surgemusic.app.ui.components.CyberPanel
 import com.surgemusic.app.ui.components.CyberTextButton
+import com.surgemusic.app.ui.components.MediaFormatChips
 import com.surgemusic.core.downloads.DownloadItem
 import com.surgemusic.core.downloads.DownloadManager
 import com.surgemusic.core.downloads.DownloadState
+import com.surgemusic.core.model.MediaInfo
 import com.surgemusic.core.model.SizeParser
 import kotlinx.coroutines.flow.StateFlow
 
@@ -130,6 +133,8 @@ private fun DownloadCard(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 4.dp),
         )
+        val mediaInfo = remember(item.request.id) { MediaInfo.fromTitle(item.request.title, item.request.forumName) }
+        MediaFormatChips(mediaInfo, Modifier.padding(top = 4.dp))
 
         LinearProgressIndicator(
             progress = { progressFraction(item) },
