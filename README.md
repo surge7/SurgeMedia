@@ -2,12 +2,12 @@
 
 Search rutracker.org for movies, video, music and books, and download them with a
 built-in torrent client straight into your media libraries (audio → `Music/`,
-video → `Movies/`). Dark and light themes (System / Light / Dark in Settings).
+video → `Movies/`). Dark and light themes (System / Light / Dark in Settings),
+English and Russian UI (System / English / Русский in Settings ▸ Appearance).
 Android app + macOS desktop from one Kotlin Multiplatform codebase.
 
-**Status:** Phase 3 — shared core + desktop CLI (Phase 1) and the Android app
-(Phase 3) are live-verified against rutracker.org. The desktop UI comes next
-(see `docs/superpowers/specs/2026-10-12-surgemusic-design.md`).
+**Status:** 0.2.0 — Android app live-verified against rutracker.org; production
+releases via GitHub / GitVerse / RuStore (see [`docs/PUBLISHING.md`](docs/PUBLISHING.md)).
 
 ## Legal
 
@@ -27,6 +27,20 @@ Build and install the debug APK:
 
     ./gradlew :composeApp:assembleDebug
     adb install -r composeApp/build/outputs/apk/debug/composeApp-debug.apk
+
+**Release build** (store-signed; without the env vars it falls back to the debug
+keystore — testing only):
+
+    export SURGEMUSIC_KEYSTORE_PATH=… SURGEMUSIC_KEYSTORE_PASSWORD=… \
+           SURGEMUSIC_KEY_ALIAS=… SURGEMUSIC_KEY_PASSWORD=…
+    ./gradlew :composeApp:assembleRelease
+
+Publishing to GitHub / GitVerse / RuStore: [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
+Privacy policy (EN/RU): [`docs/PRIVACY.md`](docs/PRIVACY.md). License: MIT.
+
+**Localization:** the UI ships English and Russian. Settings ▸ Appearance ▸ Language
+(System / English / Русский) switches instantly and survives restarts; download
+notifications follow the OS locale.
 
 **Login:** the app cannot log in with a password (rutracker.org is behind a
 Cloudflare browser check), so it logs in in-app: Search or Settings → **Log
