@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Surge Media</string>
+    <!-- Brand name — same in every locale; translatable=false keeps lint's
+         MissingTranslation check quiet without a values-ru copy. -->
+    <string name="app_name" translatable="false">Surge Media</string>
     <string name="notification_channel_downloads">Downloads</string>
     <string name="notification_title_downloads">Surge Media downloads</string>
     <string name="notification_action_pause_all">Pause all</string>
