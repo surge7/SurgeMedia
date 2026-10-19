@@ -373,7 +373,7 @@ object RuStrings : AppStrings {
     override val themeSystem = "Системная"
     override val themeLight = "Светлая"
     override val themeDark = "Тёмная"
-    override val languageCaption = "Язык — Язык приложения. «Системный» следует настройке устройства."
+    override val languageCaption = "Язык интерфейса. «Системный» следует настройке устройства."
     override val languageSystem = "Системный"
     override val languageEnglish = "English"
     override val languageRussian = "Русский"

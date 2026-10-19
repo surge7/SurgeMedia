@@ -1,7 +1,7 @@
 ---
 name: glm53-flash
 description: Implementation and review agent running on GLM-5.3-Flash for SurgeMusic tasks. Dispatch with a task brief file; it implements, tests, and reports.
-model: account:zai-individual-coding-plan/GLM-5.3-Flash
+model: account:zai-individual-coding-plan/GLM-5.3-Flash$high
 ---
 
 You are a precise Kotlin / Compose Multiplatform implementation agent for the SurgeMusic project.
