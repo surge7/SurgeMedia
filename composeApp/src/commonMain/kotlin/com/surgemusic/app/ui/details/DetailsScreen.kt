@@ -33,6 +33,7 @@ import com.surgemusic.app.ui.components.SurgePanel
 import com.surgemusic.app.ui.components.SurgeTopBar
 import com.surgemusic.app.ui.components.ScanlineDivider
 import com.surgemusic.app.ui.components.surgePanel
+import com.surgemusic.app.ui.strings.LocalStrings
 import com.surgemusic.core.model.MediaInfo
 import com.surgemusic.core.model.SearchResultRow
 import com.surgemusic.core.model.SizeParser
@@ -119,6 +120,7 @@ fun DetailsScreen(
 /** Empty state for the details pane while no result is selected (list-detail layout). */
 @Composable
 fun DetailsPanePlaceholder(modifier: Modifier = Modifier) {
+    val strings = LocalStrings.current
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         SurgePanel(modifier = Modifier.padding(24.dp)) {
             Column(
@@ -132,13 +134,13 @@ fun DetailsPanePlaceholder(modifier: Modifier = Modifier) {
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = "No topic selected".uppercase(),
+                    text = strings.detailsPlaceholderTitle.uppercase(),
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    text = "Pick a result from the list to preview its details and download.",
+                    text = strings.detailsPlaceholderBody,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -159,7 +161,8 @@ private fun ColumnScope.DetailsContent(
     added: Boolean,
     error: String?,
 ) {
-    SurgeTopBar(title = "Details", onBack = onBack, closeIcon = embedded)
+    val strings = LocalStrings.current
+    SurgeTopBar(title = strings.detailsTitle, onBack = onBack, closeIcon = embedded)
 
     Column(
         modifier = Modifier
@@ -172,18 +175,18 @@ private fun ColumnScope.DetailsContent(
             text = row.title,
             style = MaterialTheme.typography.titleLarge,
         )
-        DetailRow("Forum", row.forumName)
-        DetailRow("Size", SizeParser.formatBytes(row.sizeBytes))
+        DetailRow(strings.detailForum, row.forumName)
+        DetailRow(strings.detailSize, SizeParser.formatBytes(row.sizeBytes))
         val mediaInfo = remember(row.topicId) { MediaInfo.fromTitle(row.title, row.forumName) }
-        DetailRow("Format", mediaInfo.summary())
-        DetailRow("Seeds / Leechs", "${row.seeds} ↑ ${row.leechs} ↓")
-        DetailRow("Date", row.dateText)
-        DetailRow("Topic ID", "#${row.topicId}")
+        DetailRow(strings.detailFormat, mediaInfo.summary())
+        DetailRow(strings.detailSeedsLeechs, "${row.seeds} ↑ ${row.leechs} ↓")
+        DetailRow(strings.detailDate, row.dateText)
+        DetailRow(strings.detailTopicId, "#${row.topicId}")
 
         if (error != null) {
             ScanlineDivider(modifier = Modifier.padding(vertical = 8.dp))
             Text(
-                text = "Last attempt failed",
+                text = strings.lastAttemptFailed,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -228,6 +231,7 @@ private fun BottomBar(
     onDownload: () -> Unit,
     onOpenDownloads: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -236,25 +240,25 @@ private fun BottomBar(
             downloading -> {
                 CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
                 Text(
-                    text = "Fetching torrent…",
+                    text = strings.fetchingTorrent,
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 SurgeChip(
-                    text = "FETCHING",
+                    text = strings.fetchingLabel,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
             added -> {
                 SurgeButton(
-                    text = "Added — open Downloads",
+                    text = strings.addedOpenDownloads,
                     onClick = onOpenDownloads,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
             error != null -> {
                 SurgeButton(
-                    text = "Retry",
+                    text = strings.actionRetry,
                     onClick = onDownload,
                     modifier = Modifier.fillMaxWidth(),
                     emphasis = true,
@@ -262,7 +266,7 @@ private fun BottomBar(
             }
             else -> {
                 SurgeButton(
-                    text = "Download",
+                    text = strings.download,
                     onClick = onDownload,
                     modifier = Modifier.fillMaxWidth(),
                     emphasis = true,

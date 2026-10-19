@@ -35,6 +35,7 @@ import com.surgemusic.app.ui.components.SurgeTextField
 import com.surgemusic.app.ui.components.MediaFormatChips
 import com.surgemusic.app.ui.components.surgeGlow
 import com.surgemusic.app.ui.components.surgePanel
+import com.surgemusic.app.ui.strings.LocalStrings
 import com.surgemusic.core.model.MediaInfo
 import com.surgemusic.core.model.SearchResultRow
 import com.surgemusic.core.model.SizeParser
@@ -66,6 +67,7 @@ fun SearchScreen(
     val sort by viewModel.sort.collectAsState()
     val sorted by viewModel.sortedResults.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
+    val strings = LocalStrings.current
 
     Column(
         modifier = modifier
@@ -78,7 +80,7 @@ fun SearchScreen(
             SurgeTextField(
                 value = query,
                 onValueChange = viewModel::onQueryChange,
-                label = "Search rutracker",
+                label = strings.searchFieldLabel,
                 modifier = Modifier.weight(1f),
                 singleLine = true,
                 imeAction = ImeAction.Search,
@@ -88,7 +90,7 @@ fun SearchScreen(
             )
             Spacer(Modifier.width(8.dp))
             SurgeButton(
-                text = "Search",
+                text = strings.searchButton,
                 onClick = viewModel::search,
                 enabled = query.isNotBlank() && uiState !is SearchUiState.Loading,
             )
@@ -103,12 +105,12 @@ fun SearchScreen(
         }
 
         when (val state = uiState) {
-            SearchUiState.Idle -> Hint("Search rutracker — movies, video, music, books and more.")
+            SearchUiState.Idle -> Hint(strings.searchIdleHint)
             SearchUiState.Loading -> CircularProgressIndicator(Modifier.padding(top = 16.dp))
             is SearchUiState.Error -> ErrorBanner(state, onRetry = viewModel::retry, onLogin = onLogin)
             is SearchUiState.Ready -> {
                 if (results.isEmpty()) {
-                    Hint("No results for \"$query\".")
+                    Hint(strings.noResults(query))
                 } else {
                     LazyColumn(
                         modifier = Modifier
@@ -126,7 +128,7 @@ fun SearchScreen(
                         if (state.hasMore) {
                             item {
                                 SurgeButton(
-                                    text = "Load more",
+                                    text = strings.loadMore,
                                     onClick = viewModel::loadMore,
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -143,24 +145,25 @@ fun SearchScreen(
 
 @Composable
 private fun LoginHero(onLogin: () -> Unit) {
+    val strings = LocalStrings.current
     SurgePanel(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 12.dp),
     ) {
         Text(
-            text = "Log in to rutracker".uppercase(),
+            text = strings.loginHeroTitle.uppercase(),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.primary,
         )
         Text(
-            "Searching and downloading need a rutracker session. Log in once in the in-app browser.",
+            strings.loginHeroBody,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
         )
         SurgeButton(
-            text = "Log in",
+            text = strings.logIn,
             onClick = onLogin,
             modifier = Modifier.padding(top = 8.dp),
         )
@@ -233,6 +236,7 @@ private fun ResultRowItem(
 
 @Composable
 private fun ErrorBanner(state: SearchUiState.Error, onRetry: () -> Unit, onLogin: () -> Unit) {
+    val strings = LocalStrings.current
     Row(
         modifier = Modifier.padding(top = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -243,17 +247,17 @@ private fun ErrorBanner(state: SearchUiState.Error, onRetry: () -> Unit, onLogin
             tint = MaterialTheme.colorScheme.error,
         )
         Text(
-            text = "Search failed: ${state.message}",
+            text = strings.searchFailed(state.message),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.error,
             modifier = Modifier
                 .weight(1f)
                 .padding(horizontal = 8.dp),
         )
-        SurgeTextButton(text = "Retry", onClick = onRetry)
+        SurgeTextButton(text = strings.actionRetry, onClick = onRetry)
         if (state.needsLogin) {
             SurgeTextButton(
-                text = "Log in",
+                text = strings.logIn,
                 onClick = onLogin,
                 modifier = Modifier.padding(start = 8.dp),
             )

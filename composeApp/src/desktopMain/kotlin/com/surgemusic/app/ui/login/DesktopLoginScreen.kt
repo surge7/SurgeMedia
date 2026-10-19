@@ -30,6 +30,7 @@ import com.surgemusic.app.ui.components.SurgeButton
 import com.surgemusic.app.ui.components.SurgePanel
 import com.surgemusic.app.ui.components.SurgeTextField
 import com.surgemusic.app.ui.components.SurgeTextButton
+import com.surgemusic.app.ui.strings.LocalStrings
 import com.surgemusic.core.tracker.jvm.RutrackerClient
 import kotlinx.coroutines.launch
 
@@ -48,6 +49,7 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun DesktopLoginScreen(onFinished: () -> Unit) {
+    val strings = LocalStrings.current
     var cookieHeader by remember { mutableStateOf("") }
     var userAgent by remember { mutableStateOf("") }
     var checking by remember { mutableStateOf(false) }
@@ -73,15 +75,13 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "SIGN IN",
+                        text = strings.signInTitle.uppercase(),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
                 Text(
-                    text = "Desktop has no embedded browser. Open the tracker in your browser, " +
-                        "sign in, then copy the request's Cookie header (F12 → Network → any request " +
-                        "→ request headers → cookie) and your browser's User-Agent.",
+                    text = strings.desktopLoginBody,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
@@ -89,7 +89,7 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                 SurgeTextField(
                     value = cookieHeader,
                     onValueChange = { cookieHeader = it },
-                    label = "Cookie header",
+                    label = strings.cookieHeaderLabel,
                     modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
                     minLines = 2,
                     maxLines = 4,
@@ -97,7 +97,7 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                 SurgeTextField(
                     value = userAgent,
                     onValueChange = { userAgent = it },
-                    label = "User-Agent",
+                    label = strings.userAgentLabel,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     singleLine = true,
                     placeholder = RutrackerClient.USER_AGENT,
@@ -107,9 +107,9 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    SurgeTextButton(text = "CANCEL", onClick = onFinished)
+                    SurgeTextButton(text = strings.cancel, onClick = onFinished)
                     SurgeButton(
-                        text = "SAVE SESSION",
+                        text = strings.saveSession,
                         onClick = {
                             checking = true
                             saveError = null
@@ -119,8 +119,7 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                                     onSuccess = { onFinished() },
                                     onFailure = { e ->
                                         checking = false
-                                        saveError = "Session check failed: " +
-                                            (e.message ?: e::class.simpleName ?: "unknown error")
+                                        saveError = e.message ?: e::class.simpleName
                                     },
                                 )
                             }
@@ -133,7 +132,7 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                     CircularProgressIndicator(modifier = Modifier.padding(top = 8.dp))
                 } else if (saveError != null) {
                     Text(
-                        text = saveError.orEmpty(),
+                        text = strings.sessionCheckFailed(saveError.orEmpty()),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(top = 8.dp),

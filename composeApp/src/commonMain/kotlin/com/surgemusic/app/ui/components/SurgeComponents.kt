@@ -50,6 +50,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import com.surgemusic.app.ui.strings.LocalStrings
 
 /**
  * Surge design system primitives. Every color is read from [MaterialTheme.colorScheme] —
@@ -363,6 +364,7 @@ fun SurgeTopBar(
     modifier: Modifier = Modifier,
     closeIcon: Boolean = false,
 ) {
+    val strings = LocalStrings.current
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -377,7 +379,7 @@ fun SurgeTopBar(
                     } else {
                         Icons.AutoMirrored.Rounded.ArrowBack
                     },
-                    contentDescription = if (closeIcon) "Close" else "Back",
+                    contentDescription = if (closeIcon) strings.close else strings.back,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -468,11 +470,12 @@ fun SurgeConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "Delete files".uppercase(),
+                text = strings.deleteFiles.uppercase(),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -485,10 +488,10 @@ fun SurgeConfirmDialog(
             )
         },
         confirmButton = {
-            SurgeTextButton(text = "Delete", onClick = onConfirm, tint = MaterialTheme.colorScheme.error)
+            SurgeTextButton(text = strings.delete, onClick = onConfirm, tint = MaterialTheme.colorScheme.error)
         },
         dismissButton = {
-            SurgeTextButton(text = "Cancel", onClick = onDismiss)
+            SurgeTextButton(text = strings.cancel, onClick = onDismiss)
         },
     )
 }

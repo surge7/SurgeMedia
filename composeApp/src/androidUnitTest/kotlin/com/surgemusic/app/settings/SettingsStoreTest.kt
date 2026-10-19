@@ -1,5 +1,6 @@
 package com.surgemusic.app.settings
 
+import com.surgemusic.app.AppLanguage
 import com.surgemusic.app.ThemeMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -40,6 +41,7 @@ class SettingsStoreTest {
         assertEquals("https://rutracker.org", settings.mirror.value)
         assertEquals(3, settings.concurrentDownloads.value)
         assertEquals(ThemeMode.SYSTEM, settings.themeMode.value)
+        assertEquals(AppLanguage.SYSTEM, settings.language.value)
     }
 
     @Test
@@ -70,6 +72,29 @@ class SettingsStoreTest {
         store.putString("theme_mode", "SEPIA") // hand-edited / from a future build
 
         assertEquals(ThemeMode.SYSTEM, SettingsStore(store).themeMode.value)
+    }
+
+    @Test
+    fun languageRoundTrips() {
+        val store = InMemoryKeyValueStore()
+        val settings = SettingsStore(store)
+
+        settings.setLanguage(AppLanguage.RUSSIAN)
+        assertEquals(AppLanguage.RUSSIAN, settings.language.value)
+
+        settings.setLanguage(AppLanguage.ENGLISH)
+        assertEquals(AppLanguage.ENGLISH, settings.language.value)
+
+        val reloaded = SettingsStore(store) // same backing store, fresh instance
+        assertEquals(AppLanguage.ENGLISH, reloaded.language.value)
+    }
+
+    @Test
+    fun unknownPersistedLanguageFallsBackToSystem() {
+        val store = InMemoryKeyValueStore()
+        store.putString("language", "KLINGON") // hand-edited / from a future build
+
+        assertEquals(AppLanguage.SYSTEM, SettingsStore(store).language.value)
     }
 
     @Test

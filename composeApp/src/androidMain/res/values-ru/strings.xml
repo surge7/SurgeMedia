@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- app_name stays untranslated: brand (falls back to values/strings.xml). -->
+    <string name="notification_channel_downloads">Загрузки</string>
+    <string name="notification_title_downloads">Загрузки Surge Media</string>
+    <string name="notification_action_pause_all">Приостановить все</string>
+    <string name="notification_active_count">Активных: %1$d</string>
+    <string name="notification_queued_count">В очереди: %1$d</string>
+</resources>

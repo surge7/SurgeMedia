@@ -42,6 +42,8 @@ import com.surgemusic.app.ui.components.SurgePanel
 import com.surgemusic.app.ui.components.SurgeTextButton
 import com.surgemusic.app.ui.components.MediaFormatChips
 import com.surgemusic.app.ui.components.SurgeResultBanner
+import com.surgemusic.app.ui.strings.AppStrings
+import com.surgemusic.app.ui.strings.LocalStrings
 import com.surgemusic.core.downloads.DownloadItem
 import com.surgemusic.core.downloads.DownloadManager
 import com.surgemusic.core.downloads.DownloadState
@@ -54,6 +56,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+
+/**
+ * Banner outcome of a delete/cleanup action — structured so the screen renders it through
+ * the active language ([DeleteFailed.detail] stays the raw exception message).
+ */
+sealed interface DownloadsMessage {
+    data class DeletedFiles(val count: Int) : DownloadsMessage
+    data class DeleteFailed(val detail: String?) : DownloadsMessage
+}
 
 /**
  * Downloads view model (plan Task 8): a thin wrapper over [DownloadManager]'s item
@@ -71,10 +82,10 @@ class DownloadsViewModel(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    private val _message = MutableStateFlow<String?>(null)
+    private val _message = MutableStateFlow<DownloadsMessage?>(null)
 
-    /** Last delete/cleanup result line; null = nothing to banner. Dismiss via [consumeMessage]. */
-    val message: StateFlow<String?> = _message.asStateFlow()
+    /** Last delete/cleanup outcome; null = nothing to banner. Dismiss via [consumeMessage]. */
+    val message: StateFlow<DownloadsMessage?> = _message.asStateFlow()
 
     fun consumeMessage() {
         _message.value = null
@@ -95,9 +106,9 @@ class DownloadsViewModel(
         scope.launch {
             cleaner.deleteFor(item).onSuccess { n ->
                 manager.remove(item.request.id)
-                flash("Deleted $n file(s)")
+                flash(DownloadsMessage.DeletedFiles(n))
             }.onFailure {
-                flash("Delete failed: ${it.message}")
+                flash(DownloadsMessage.DeleteFailed(it.message))
             }
         }
     }
@@ -107,14 +118,14 @@ class DownloadsViewModel(
         scope.launch {
             cleaner.deleteAll().onSuccess { n ->
                 manager.clearCompleted()
-                flash("Deleted $n file(s)")
+                flash(DownloadsMessage.DeletedFiles(n))
             }.onFailure {
-                flash("Delete failed: ${it.message}")
+                flash(DownloadsMessage.DeleteFailed(it.message))
             }
         }
     }
 
-    private fun flash(text: String) {
+    private fun flash(text: DownloadsMessage) {
         _message.value = text
     }
 }
@@ -139,6 +150,7 @@ fun DownloadsScreen(
     modifier: Modifier = Modifier,
 ) {
     val items by viewModel.items.collectAsState()
+    val strings = LocalStrings.current
 
     if (items.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -155,7 +167,7 @@ fun DownloadsScreen(
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = "No downloads yet — find a movie, album or show",
+                        text = strings.emptyDownloads,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -172,8 +184,14 @@ fun DownloadsScreen(
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(modifier = Modifier.fillMaxSize().widthIn(max = MaxContentWidth)) {
-            message?.let { text ->
-                SurgeResultBanner(text = text, onDismiss = viewModel::consumeMessage)
+            message?.let { msg ->
+                SurgeResultBanner(
+                    text = when (msg) {
+                        is DownloadsMessage.DeletedFiles -> strings.deletedFiles(msg.count)
+                        is DownloadsMessage.DeleteFailed -> strings.deleteFailed(msg.detail)
+                    },
+                    onDismiss = viewModel::consumeMessage,
+                )
             }
 
             Row(
@@ -181,9 +199,9 @@ fun DownloadsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Spacer(Modifier.weight(1f))
-                SurgeTextButton(text = "Clear history", onClick = viewModel::clearCompleted)
+                SurgeTextButton(text = strings.clearHistory, onClick = viewModel::clearCompleted)
                 SurgeTextButton(
-                    text = "Delete all files",
+                    text = strings.deleteAllFiles,
                     onClick = { showDeleteAll = true },
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(start = 16.dp),
@@ -212,7 +230,7 @@ fun DownloadsScreen(
 
     pendingDeleteItem?.let { item ->
         SurgeConfirmDialog(
-            text = "Delete the downloaded files for this item from your device?",
+            text = strings.confirmDeleteItemFiles,
             onConfirm = {
                 pendingDeleteItem = null
                 viewModel.deleteFiles(item)
@@ -223,7 +241,7 @@ fun DownloadsScreen(
 
     if (showDeleteAll) {
         SurgeConfirmDialog(
-            text = "Delete ALL files Surge Media downloaded? This cannot be undone.",
+            text = strings.confirmDeleteAllFiles,
             onConfirm = {
                 showDeleteAll = false
                 viewModel.deleteAllFiles()
@@ -242,6 +260,7 @@ private fun DownloadCard(
     onRemove: () -> Unit,
     onDeleteFiles: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     val active = item.state in ACTIVE_STATES
     SurgePanel(
         modifier = Modifier.fillMaxWidth(),
@@ -276,17 +295,17 @@ private fun DownloadCard(
             modifier = Modifier.padding(top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SurgeChip(text = statusText(item.state), color = statusColor(item.state))
+            SurgeChip(text = statusText(item.state, strings), color = statusColor(item.state))
             Spacer(Modifier.weight(1f))
             if (item.state == DownloadState.DOWNLOADING) {
-                SurgeTextButton(text = "Pause", onClick = onPause)
+                SurgeTextButton(text = strings.pause, onClick = onPause)
             }
             if (item.state == DownloadState.PAUSED) {
-                SurgeTextButton(text = "Resume", onClick = onResume)
+                SurgeTextButton(text = strings.resume, onClick = onResume)
             }
             if (active) {
                 SurgeTextButton(
-                    text = "Cancel",
+                    text = strings.cancel,
                     onClick = onCancel,
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(start = 8.dp),
@@ -294,14 +313,14 @@ private fun DownloadCard(
             }
             if (item.state in TERMINAL_STATES) {
                 SurgeTextButton(
-                    text = "Remove",
+                    text = strings.remove,
                     onClick = onRemove,
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
             if (item.state == DownloadState.DONE) {
                 SurgeTextButton(
-                    text = "Delete files",
+                    text = strings.deleteFiles,
                     onClick = onDeleteFiles,
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(start = 8.dp),
@@ -309,7 +328,7 @@ private fun DownloadCard(
             }
         }
 
-        val detail = statusLine(item)
+        val detail = statusLine(item, strings)
         if (detail.isNotEmpty()) {
             Text(
                 text = detail,
@@ -337,13 +356,14 @@ private fun DownloadCard(
 }
 
 /** Speed + peers are shown while downloading; else just the byte counters. */
-private fun statusLine(item: DownloadItem): String {
+private fun statusLine(item: DownloadItem, strings: AppStrings): String {
     val parts = mutableListOf<String>()
     if (item.bytesDone > 0 && item.state != DownloadState.DONE) {
         parts += "${SizeParser.formatBytes(item.bytesDone)} / ${SizeParser.formatBytes(item.bytesTotal)}"
     }
     if (item.state == DownloadState.DOWNLOADING) {
-        parts += "${SizeParser.formatBytes(item.downloadSpeed)}/s · ${item.peers} peers"
+        parts += strings.speedPerSecond(SizeParser.formatBytes(item.downloadSpeed)) + " · " +
+            strings.peersCount(item.peers)
     }
     return parts.joinToString(" · ")
 }
@@ -354,14 +374,14 @@ private fun progressFraction(item: DownloadItem): Float = when {
     else -> 0f
 }
 
-private fun statusText(state: DownloadState): String = when (state) {
-    DownloadState.QUEUED -> "Queued"
-    DownloadState.DOWNLOADING -> "Downloading"
-    DownloadState.PAUSED -> "Paused"
-    DownloadState.FINALIZING -> "Finalizing"
-    DownloadState.DONE -> "Done"
-    DownloadState.FAILED -> "Failed"
-    DownloadState.CANCELLED -> "Cancelled"
+private fun statusText(state: DownloadState, strings: AppStrings): String = when (state) {
+    DownloadState.QUEUED -> strings.stateQueued
+    DownloadState.DOWNLOADING -> strings.stateDownloading
+    DownloadState.PAUSED -> strings.statePaused
+    DownloadState.FINALIZING -> strings.stateFinalizing
+    DownloadState.DONE -> strings.stateDone
+    DownloadState.FAILED -> strings.stateFailed
+    DownloadState.CANCELLED -> strings.stateCancelled
 }
 
 @Composable

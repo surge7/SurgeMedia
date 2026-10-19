@@ -21,9 +21,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import com.surgemusic.app.ui.strings.AppStrings
+import com.surgemusic.app.ui.strings.LocalStrings
 
 /** Chamfered chip corner — a smaller sibling of the panels' `CutCornerShape(10.dp)`. */
 private val SortChipShape = CutCornerShape(topStart = 6.dp, bottomEnd = 6.dp)
+
+/** Sort display labels; the enum itself stays data-only so labels localize with the UI. */
+private fun sortLabel(sort: SearchSort, strings: AppStrings): String = when (sort) {
+    SearchSort.RELEVANCE -> strings.sortByRelevance
+    SearchSort.SEEDS -> strings.sortBySeeds
+    SearchSort.SIZE -> strings.sortBySize
+    SearchSort.DATE -> strings.sortByDate
+    SearchSort.TITLE -> strings.sortByTitle
+}
 
 /**
  * Compact single-select sort switcher (plan: "sorting options for search results").
@@ -40,6 +51,7 @@ fun SortBar(
     onSelect: (SearchSort) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     Row(
         modifier = modifier
             .heightIn(max = 40.dp)
@@ -47,14 +59,14 @@ fun SortBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "SORT",
+            text = strings.sortByLabel,
             style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.2.em),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(end = 4.dp),
         )
         SearchSort.entries.forEach { option ->
             SortChip(
-                text = option.label,
+                text = sortLabel(option, strings),
                 selected = option == current,
                 onClick = { if (option != current) onSelect(option) },
                 modifier = Modifier.padding(start = 6.dp),

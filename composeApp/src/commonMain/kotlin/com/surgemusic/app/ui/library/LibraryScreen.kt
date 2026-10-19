@@ -39,6 +39,8 @@ import com.surgemusic.app.ui.components.SurgePanel
 import com.surgemusic.app.ui.components.SurgeResultBanner
 import com.surgemusic.app.ui.components.SurgeSectionHeader
 import com.surgemusic.app.ui.components.SurgeTextButton
+import com.surgemusic.app.ui.strings.AppStrings
+import com.surgemusic.app.ui.strings.LocalStrings
 import com.surgemusic.core.model.SizeParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +49,17 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+
+/**
+ * Banner outcome of a delete/refresh action — structured so the screen renders it through
+ * the active language ([DeleteFailed]/[RefreshFailed] keep the raw exception message).
+ */
+sealed interface LibraryMessage {
+    data class DeletedFiles(val count: Int) : LibraryMessage
+    data class DeletedRelease(val count: Int, val title: String) : LibraryMessage
+    data class DeleteFailed(val detail: String?) : LibraryMessage
+    data class RefreshFailed(val detail: String?) : LibraryMessage
+}
 
 /**
  * Downloaded tab view model: what the app has already finalized onto the device's media
@@ -63,9 +76,9 @@ class LibraryViewModel(private val library: DownloadedLibrary) {
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
-    /** Last delete/refresh outcome line; null = nothing to banner. Dismiss via [consumeMessage]. */
-    private val _message = MutableStateFlow<String?>(null)
-    val message: StateFlow<String?> = _message.asStateFlow()
+    /** Last delete/refresh outcome; null = nothing to banner. Dismiss via [consumeMessage]. */
+    private val _message = MutableStateFlow<LibraryMessage?>(null)
+    val message: StateFlow<LibraryMessage?> = _message.asStateFlow()
 
     fun consumeMessage() {
         _message.value = null
@@ -78,7 +91,7 @@ class LibraryViewModel(private val library: DownloadedLibrary) {
             library.list().fold(
                 onSuccess = { releases -> _releases.value = releases },
                 onFailure = { e ->
-                    flash("Could not read the library: ${e.message ?: e::class.simpleName}")
+                    flash(LibraryMessage.RefreshFailed(e.message ?: e::class.simpleName))
                 },
             )
             _loading.value = false
@@ -89,8 +102,8 @@ class LibraryViewModel(private val library: DownloadedLibrary) {
     fun delete(release: DownloadedRelease) {
         scope.launch {
             library.delete(release).fold(
-                onSuccess = { n -> flash("Deleted $n file(s) — ${release.title}") },
-                onFailure = { e -> flash("Delete failed: ${e.message ?: e::class.simpleName}") },
+                onSuccess = { n -> flash(LibraryMessage.DeletedRelease(n, release.title)) },
+                onFailure = { e -> flash(LibraryMessage.DeleteFailed(e.message ?: e::class.simpleName)) },
             )
             library.list().onSuccess { _releases.value = it }
         }
@@ -99,14 +112,14 @@ class LibraryViewModel(private val library: DownloadedLibrary) {
     fun deleteAll() {
         scope.launch {
             library.deleteAll().fold(
-                onSuccess = { n -> flash("Deleted $n file(s)") },
-                onFailure = { e -> flash("Delete failed: ${e.message ?: e::class.simpleName}") },
+                onSuccess = { n -> flash(LibraryMessage.DeletedFiles(n)) },
+                onFailure = { e -> flash(LibraryMessage.DeleteFailed(e.message ?: e::class.simpleName)) },
             )
             library.list().onSuccess { _releases.value = it }
         }
     }
 
-    private fun flash(text: String) {
+    private fun flash(text: LibraryMessage) {
         _message.value = text
     }
 }
@@ -134,22 +147,31 @@ fun LibraryScreen(
     val message by viewModel.message.collectAsState()
     var pendingDelete by remember { mutableStateOf<DownloadedRelease?>(null) }
     var showDeleteAll by remember { mutableStateOf(false) }
+    val strings = LocalStrings.current
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(modifier = Modifier.fillMaxSize().widthIn(max = MaxContentWidth)) {
-            message?.let { text ->
-                SurgeResultBanner(text = text, onDismiss = viewModel::consumeMessage)
+            message?.let { msg ->
+                SurgeResultBanner(
+                    text = when (msg) {
+                        is LibraryMessage.DeletedFiles -> strings.deletedFiles(msg.count)
+                        is LibraryMessage.DeletedRelease -> strings.deletedFilesFor(msg.count, msg.title)
+                        is LibraryMessage.DeleteFailed -> strings.deleteFailed(msg.detail)
+                        is LibraryMessage.RefreshFailed -> strings.libraryReadFailed(msg.detail)
+                    },
+                    onDismiss = viewModel::consumeMessage,
+                )
             }
 
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                SurgeSectionHeader("Downloaded", modifier = Modifier.padding(end = 8.dp))
+                SurgeSectionHeader(strings.libraryHeader, modifier = Modifier.padding(end = 8.dp))
                 Spacer(Modifier.weight(1f))
-                SurgeTextButton(text = "Refresh", onClick = viewModel::refresh)
+                SurgeTextButton(text = strings.refresh, onClick = viewModel::refresh)
                 SurgeTextButton(
-                    text = "Delete all",
+                    text = strings.deleteAll,
                     onClick = { showDeleteAll = true },
                     tint = MaterialTheme.colorScheme.error,
                     enabled = releases.isNotEmpty(),
@@ -181,7 +203,7 @@ fun LibraryScreen(
                                 modifier = Modifier.size(48.dp),
                             )
                             Text(
-                                text = "Nothing downloaded yet — finished downloads land here",
+                                text = strings.emptyLibrary,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
@@ -208,8 +230,11 @@ fun LibraryScreen(
 
     pendingDelete?.let { release ->
         SurgeConfirmDialog(
-            text = "Delete \"${release.title}\" (${release.filesCount} file(s), " +
-                "${SizeParser.formatBytes(release.totalBytes)}) from your device?",
+            text = strings.confirmDeleteRelease(
+                title = release.title,
+                files = release.filesCount,
+                size = SizeParser.formatBytes(release.totalBytes),
+            ),
             onConfirm = {
                 pendingDelete = null
                 viewModel.delete(release)
@@ -220,7 +245,7 @@ fun LibraryScreen(
 
     if (showDeleteAll) {
         SurgeConfirmDialog(
-            text = "Delete ALL downloaded files from every library? This cannot be undone.",
+            text = strings.confirmDeleteAllLibrary,
             onConfirm = {
                 showDeleteAll = false
                 viewModel.deleteAll()
@@ -230,12 +255,25 @@ fun LibraryScreen(
     }
 }
 
+/**
+ * Localized display name for a library kind/location label. The raw values ("Music",
+ * "Movies", …) are data keys — color mapping and delete matching compare them — so only
+ * the rendered text is swapped; anything unrecognized (e.g. "Pictures", desktop paths)
+ * shows as-is.
+ */
+private fun libraryKindDisplay(label: String, strings: AppStrings): String = when (label) {
+    "Music" -> strings.libraryMusic
+    "Movies" -> strings.libraryMovies
+    else -> label
+}
+
 /** Card for one finalized release: title, kind chip, location · files · size, Delete. */
 @Composable
 private fun ReleaseCard(
     release: DownloadedRelease,
     onDelete: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     SurgePanel(
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
@@ -251,9 +289,13 @@ private fun ReleaseCard(
             modifier = Modifier.padding(top = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SurgeChip(text = release.kindLabel, color = kindColor(release.kindLabel))
+            SurgeChip(
+                text = libraryKindDisplay(release.kindLabel, strings),
+                color = kindColor(release.kindLabel),
+            )
             Text(
-                text = "${release.locationLabel} · ${release.filesCount} file(s) · " +
+                text = "${libraryKindDisplay(release.locationLabel, strings)} · " +
+                    "${strings.fileCount(release.filesCount)} · " +
                     SizeParser.formatBytes(release.totalBytes),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -265,7 +307,7 @@ private fun ReleaseCard(
         Row(modifier = Modifier.padding(top = 8.dp)) {
             Spacer(Modifier.weight(1f))
             SurgeTextButton(
-                text = "Delete",
+                text = strings.delete,
                 onClick = onDelete,
                 tint = MaterialTheme.colorScheme.error,
             )

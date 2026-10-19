@@ -1,6 +1,8 @@
 package com.surgemusic.app.settings
 
+import com.surgemusic.app.AppLanguage
 import com.surgemusic.app.ThemeMode
+import com.surgemusic.app.appLanguageOf
 import com.surgemusic.app.themeModeOf
 import com.surgemusic.app.ui.settings.AppSettings
 import java.nio.file.Files
@@ -18,7 +20,8 @@ import kotlinx.coroutines.launch
  * App settings on desktop (plan Task 6): `java.util.Properties` persisted at
  * `~/.surgemusic/settings.properties`. Same defaults as androidMain's `SettingsStore` —
  * Wi-Fi only = on, mirror = `https://rutracker.org`, 3 concurrent downloads, theme =
- * System — and the same keys, so a hand-copied file ports between platforms.
+ * System, language = System — and the same keys, so a hand-copied file ports between
+ * platforms.
  *
  * Write discipline (desktop twin of androidMain's SharedPreferences `apply()`, which never
  * touches disk on the calling thread): setters mutate the in-memory [Properties] and emit
@@ -52,6 +55,9 @@ class DesktopSettingsStore(
 
     private val _themeMode = MutableStateFlow(themeModeOf(props.getProperty(KEY_THEME_MODE)))
     override val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+
+    private val _language = MutableStateFlow(appLanguageOf(props.getProperty(KEY_LANGUAGE)))
+    override val language: StateFlow<AppLanguage> = _language.asStateFlow()
 
     override fun setWifiOnly(enabled: Boolean) {
         val snapshot = synchronized(ioLock) {
@@ -91,6 +97,15 @@ class DesktopSettingsStore(
         flushAsync(snapshot)
     }
 
+    override fun setLanguage(language: AppLanguage) {
+        val snapshot = synchronized(ioLock) {
+            props.setProperty(KEY_LANGUAGE, language.name)
+            _language.value = language
+            props.clone() as Properties
+        }
+        flushAsync(snapshot)
+    }
+
     private fun load(): Properties {
         val props = Properties()
         runCatching {
@@ -123,6 +138,7 @@ class DesktopSettingsStore(
         const val KEY_MIRROR = "mirror"
         const val KEY_CONCURRENT_DOWNLOADS = "concurrent_downloads"
         const val KEY_THEME_MODE = "theme_mode"
+        const val KEY_LANGUAGE = "language"
         const val DEFAULT_WIFI_ONLY = true
         const val DEFAULT_MIRROR = "https://rutracker.org"
         const val DEFAULT_CONCURRENT_DOWNLOADS = 3

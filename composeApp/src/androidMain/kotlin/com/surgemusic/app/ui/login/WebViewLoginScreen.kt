@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.surgemusic.app.AppContainer
 import com.surgemusic.app.ui.components.SurgeTextButton
+import com.surgemusic.app.ui.strings.LocalStrings
 
 private const val LOGIN_URL = "https://rutracker.org/forum/login.php"
 // Must be a /forum/ URL: rutracker's bb_session cookie is path-scoped to /forum/,
@@ -48,6 +49,7 @@ private const val COOKIE_URL = "https://rutracker.org/forum/"
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun WebViewLoginScreen(onFinished: (Boolean) -> Unit) {
+    val strings = LocalStrings.current
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
@@ -69,12 +71,12 @@ fun WebViewLoginScreen(onFinished: (Boolean) -> Unit) {
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "SIGN IN",
+                    text = strings.signInTitle.uppercase(),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.weight(1f))
-                SurgeTextButton(text = "Cancel", onClick = { onFinished(false) })
+                SurgeTextButton(text = strings.cancel, onClick = { onFinished(false) })
             }
             AndroidView(
                 modifier = Modifier

@@ -1,6 +1,8 @@
 package com.surgemusic.app.settings
 
+import com.surgemusic.app.AppLanguage
 import com.surgemusic.app.ThemeMode
+import com.surgemusic.app.appLanguageOf
 import com.surgemusic.app.themeModeOf
 import com.surgemusic.app.ui.settings.AppSettings
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -10,8 +12,9 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * App settings (plan Task 7): SharedPreferences-backed [StateFlow]s.
  * Defaults: Wi-Fi only = on, mirror = `https://rutracker.org`, 3 concurrent downloads,
- * theme = System. Setters persist first, then emit; writes come from the UI thread.
- * Implements the commonMain [AppSettings] slice so the Settings screen (Task 9) drives it.
+ * theme = System, language = System. Setters persist first, then emit; writes come from
+ * the UI thread. Implements the commonMain [AppSettings] slice so the Settings screen
+ * (Task 9) drives it.
  */
 class SettingsStore(private val store: KeyValueStore) : AppSettings {
     private val _wifiOnly = MutableStateFlow(store.getBoolean(KEY_WIFI_ONLY, DEFAULT_WIFI_ONLY))
@@ -26,6 +29,9 @@ class SettingsStore(private val store: KeyValueStore) : AppSettings {
 
     private val _themeMode = MutableStateFlow(themeModeOf(store.getString(KEY_THEME_MODE)))
     override val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+
+    private val _language = MutableStateFlow(appLanguageOf(store.getString(KEY_LANGUAGE)))
+    override val language: StateFlow<AppLanguage> = _language.asStateFlow()
 
     override fun setWifiOnly(enabled: Boolean) {
         store.putBoolean(KEY_WIFI_ONLY, enabled)
@@ -49,11 +55,17 @@ class SettingsStore(private val store: KeyValueStore) : AppSettings {
         _themeMode.value = mode
     }
 
+    override fun setLanguage(language: AppLanguage) {
+        store.putString(KEY_LANGUAGE, language.name)
+        _language.value = language
+    }
+
     private companion object {
         const val KEY_WIFI_ONLY = "wifi_only"
         const val KEY_MIRROR = "mirror"
         const val KEY_CONCURRENT_DOWNLOADS = "concurrent_downloads"
         const val KEY_THEME_MODE = "theme_mode"
+        const val KEY_LANGUAGE = "language"
         const val DEFAULT_WIFI_ONLY = true
         const val DEFAULT_MIRROR = "https://rutracker.org"
         const val DEFAULT_CONCURRENT_DOWNLOADS = 3

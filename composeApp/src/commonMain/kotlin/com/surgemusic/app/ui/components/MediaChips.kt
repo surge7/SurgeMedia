@@ -14,6 +14,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.surgemusic.app.ui.strings.AppStrings
+import com.surgemusic.app.ui.strings.LocalStrings
 import com.surgemusic.core.model.MediaInfo
 import com.surgemusic.core.model.MediaKind
 
@@ -26,12 +28,13 @@ import com.surgemusic.core.model.MediaKind
 @Composable
 fun MediaFormatChips(mediaInfo: MediaInfo, modifier: Modifier = Modifier) {
     if (mediaInfo.kind == MediaKind.UNKNOWN) return
+    val strings = LocalStrings.current
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MediaChip(text = mediaInfo.kind.labelText, color = mediaInfo.kind.chipColor())
+        MediaChip(text = mediaInfo.kind.labelText(strings), color = mediaInfo.kind.chipColor())
         mediaInfo.chips()
             .take(MAX_EXTRA_CHIPS)
             .forEach { chip -> MediaChip(text = chip, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -49,13 +52,12 @@ private fun MediaKind.chipColor(): Color = when (this) {
     MediaKind.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
-private val MediaKind.labelText: String
-    get() = when (this) {
-        MediaKind.AUDIO -> "Audio"
-        MediaKind.VIDEO -> "Video"
-        MediaKind.BOOK -> "Book"
-        MediaKind.UNKNOWN -> "?"
-    }
+private fun MediaKind.labelText(strings: AppStrings): String = when (this) {
+    MediaKind.AUDIO -> strings.kindAudio
+    MediaKind.VIDEO -> strings.kindVideo
+    MediaKind.BOOK -> strings.kindBook
+    MediaKind.UNKNOWN -> "?"
+}
 
 /** Border-only single-line chip matching SurgeChip's look, with ellipsized text. */
 @Composable

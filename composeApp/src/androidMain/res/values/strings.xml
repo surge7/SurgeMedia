@@ -4,4 +4,6 @@
     <string name="notification_channel_downloads">Downloads</string>
     <string name="notification_title_downloads">Surge Media downloads</string>
     <string name="notification_action_pause_all">Pause all</string>
+    <string name="notification_active_count">%1$d active</string>
+    <string name="notification_queued_count">%1$d queued</string>
 </resources>

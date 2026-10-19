@@ -23,10 +23,8 @@ sealed interface SearchUiState {
     data class Error(val message: String, val needsLogin: Boolean) : SearchUiState
 }
 
-/** Client-side sort modes for loaded search results (no server-side `o=`/`s=` params). */
-enum class SearchSort(val label: String) {
-    RELEVANCE("Relevance"), SEEDS("Seeds"), SIZE("Size"), DATE("Date"), TITLE("Title")
-}
+/** Client-side sort modes for loaded search results (no server-side `o=`/`s=` params); labels live in the UI. */
+enum class SearchSort { RELEVANCE, SEEDS, SIZE, DATE, TITLE }
 
 /** 3-letter month abbreviations (Russian first, Latin aliases) → month number; matched lowercased. */
 private val MONTHS: Map<String, Int> = buildMap {
