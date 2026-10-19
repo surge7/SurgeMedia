@@ -76,6 +76,38 @@ android {
         versionCode = 1
         versionName = "0.2.0"
     }
+    // Env-driven release signing: when all four SURGEMUSIC_* vars are present (store
+    // upload, CI secret), releases are signed with the real keystore.
+    val env = System.getenv()
+    val hasReleaseKeystore = env.containsKey("SURGEMUSIC_KEYSTORE_PATH") &&
+        env.containsKey("SURGEMUSIC_KEYSTORE_PASSWORD") &&
+        env.containsKey("SURGEMUSIC_KEY_ALIAS") &&
+        env.containsKey("SURGEMUSIC_KEY_PASSWORD")
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(env["SURGEMUSIC_KEYSTORE_PATH"])
+                storePassword = env["SURGEMUSIC_KEYSTORE_PASSWORD"]
+                keyAlias = env["SURGEMUSIC_KEY_ALIAS"]
+                keyPassword = env["SURGEMUSIC_KEY_PASSWORD"]
+            }
+        }
+    }
+    buildTypes {
+        release {
+            // Minification is off: R8 + jlibtorrent/JNI keep rules are unverified; revisit before enabling.
+            isMinifyEnabled = false
+            // Without the env vars, fall back to the debug keystore — local/CI release
+            // builds then produce a debug-signed APK (fine for testing; never for store upload).
+            signingConfig = if (hasReleaseKeystore) signingConfigs.getByName("release")
+            else signingConfigs.getByName("debug")
+        }
+    }
     buildFeatures { compose = true }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    // lintVital must not block store packaging during 0.x; run :composeApp:lint explicitly when needed.
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
 }

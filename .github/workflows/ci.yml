@@ -10,4 +10,6 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: "21" }
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew :core:jvmTest :cli:build
+      - run: >
+          ./gradlew :core:jvmTest :cli:build :composeApp:assembleDebug
+          :composeApp:testDebugUnitTest :composeApp:jvmTest
