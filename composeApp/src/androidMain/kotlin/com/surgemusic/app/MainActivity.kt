@@ -16,6 +16,10 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import com.surgemusic.app.ui.login.WebViewLoginScreen
 import com.surgemusic.core.downloads.DownloadRequest
 import java.io.File
@@ -23,8 +27,9 @@ import kotlin.concurrent.thread
 
 class MainActivity : ComponentActivity() {
 
-    private val requestNotifications =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* best effort */ }
+    /** Notifications (API 33+) + media reads (Downloaded tab): one best-effort prompt at launch. */
+    private val requestPermissions =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { /* best effort */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,21 +40,32 @@ class MainActivity : ComponentActivity() {
         // instead of blocking the UI thread at the first enqueue or service start.
         thread(name = "engine-prewarm") { AppContainer.engine }
         registerDebugEnqueueHook()
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        // Edge-to-edge under the cyberpunk theme: transparent system bars so the dark
-        // background runs under them; dark style = light (cyan-on-dark) system icons.
-        enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-        )
+        requestPermissionsAtLaunch()
+        // Edge-to-edge baseline (transparent bars); the SideEffect below re-styles the
+        // system-bar icons whenever the effective theme changes — the light theme needs
+        // dark icons, the dark theme light ones.
+        enableEdgeToEdge()
         setContent {
+            // Effective theme = Settings ▸ Appearance preference (System / Light / Dark).
+            val themeMode by AppContainer.settingsViewModel.themeMode.collectAsState()
+            val dark = when (themeMode) {
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
+            }
+            SideEffect {
+                val transparent = android.graphics.Color.TRANSPARENT
+                val style = if (dark) {
+                    SystemBarStyle.dark(transparent)
+                } else {
+                    SystemBarStyle.light(transparent, transparent)
+                }
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+            }
             App(
                 searchViewModel = AppContainer.searchViewModel,
                 downloadsViewModel = AppContainer.downloadsViewModel,
+                libraryViewModel = AppContainer.libraryViewModel,
                 settingsViewModel = AppContainer.settingsViewModel,
                 sessionRepository = AppContainer.sessionStore,
                 loginOverlay = { onFinished -> WebViewLoginScreen(onFinished) },
@@ -62,6 +78,28 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         AppContainer.startDownloadService()
         AppContainer.healNetworkGate()
+    }
+
+    /**
+     * One best-effort prompt for everything optional: notifications (API 33+) and the
+     * media reads behind the Downloaded tab (media the app finalized is always visible
+     * to it; the reads cover rows MediaStore no longer attributes to this install).
+     * Already-granted/denied permissions are filtered out so nothing re-prompts.
+     */
+    private fun requestPermissionsAtLaunch() {
+        val wanted = buildList {
+            if (Build.VERSION.SDK_INT >= 33) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+                add(Manifest.permission.READ_MEDIA_AUDIO)
+                add(Manifest.permission.READ_MEDIA_VIDEO)
+                add(Manifest.permission.READ_MEDIA_IMAGES)
+            } else {
+                @Suppress("DEPRECATION")
+                add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+        }
+        val missing = wanted.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty()) requestPermissions.launch(missing.toTypedArray())
     }
 
     /**

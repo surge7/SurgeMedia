@@ -13,8 +13,10 @@ import com.surgemusic.app.session.KeystoreSessionStore
 import com.surgemusic.app.session.SessionRepository
 import com.surgemusic.app.settings.SharedPreferencesStore
 import com.surgemusic.app.settings.SettingsStore
+import com.surgemusic.app.downloads.MediaStoreLibrary
 import com.surgemusic.app.ui.downloads.DownloadsViewModel
 import com.surgemusic.app.ui.search.SearchViewModel
+import com.surgemusic.app.ui.library.LibraryViewModel
 import com.surgemusic.app.ui.settings.SettingsViewModel
 import com.surgemusic.core.downloads.DownloadManager
 import com.surgemusic.core.downloads.DownloadRequest
@@ -90,7 +92,7 @@ object AppContainer {
 
     /**
      * Download queue (Task 8 wiring): the finalize hook moves a finished torrent's staged
-     * files into `Music/SurgeMusic/` via [MediaStoreFinalizer] (spec §6, scoped storage).
+     * files into `Music/SurgeMedia/` / `Movies/SurgeMedia/` via [MediaStoreFinalizer] (spec §6, scoped storage).
      */
     val downloadManager: DownloadManager by lazy {
         DownloadManager(
@@ -102,6 +104,9 @@ object AppContainer {
 
     /** Downloads view model for the Downloads tab (Task 8; file deletion via MediaStore). */
     val downloadsViewModel: DownloadsViewModel by lazy { DownloadsViewModel(downloadManager, MediaStoreCleaner(appContext)) }
+
+    /** Downloaded tab (finalized files on the media libraries). */
+    val libraryViewModel: LibraryViewModel by lazy { LibraryViewModel(MediaStoreLibrary(appContext)) }
 
     /**
      * Settings view model for the Settings tab (Task 9): session management + manual import

@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
     alias(libs.plugins.android.application)
@@ -40,6 +41,13 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
         }
+        // Desktop library tests run on the JVM target (jvmTest depends on jvmMain →
+        // desktopMain, so DesktopLibrary & co. are visible). Runs via :composeApp:jvmTest.
+        val jvmTest by getting
+        jvmTest.dependencies {
+            implementation(libs.kotlin.test)
+            implementation(libs.kotlinx.coroutines.test)
+        }
     }
     jvmToolchain(21)
 }
@@ -48,6 +56,14 @@ compose.desktop.application {
     // JvmApplication.mainClass is a plain String var in compose-gradle-plugin 1.8.1
     // (no Property.set) — assign directly.
     mainClass = "com.surgemusic.app.MainKt"
+
+    // Without a target format no packaging task (packageDmg & co.) is registered.
+    nativeDistributions {
+        targetFormats(TargetFormat.Dmg)
+        packageName = "SurgeMedia"
+        // macOS installer requires MAJOR >= 1; app version stays in versionName (0.2.0).
+        packageVersion = "1.0.0"
+    }
 }
 
 android {

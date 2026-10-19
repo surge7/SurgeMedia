@@ -8,3 +8,17 @@ local.properties
 .playwright-mcp/
 *.hprof
 .build-artifacts/
+
+# Yandex Disk release uploads (contains OAuth token when set)
+.env.yandex
+
+# Release signing (never commit keystores or their credentials)
+*.jks
+*.keystore
+keystore.properties
+
+# Session/tool artifacts — keep only the project agent definitions
+.v2c/
+.video_agent/
+.zcode/*
+!.zcode/agents/

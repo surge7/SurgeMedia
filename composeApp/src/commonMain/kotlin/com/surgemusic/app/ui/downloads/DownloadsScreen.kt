@@ -13,11 +13,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -35,10 +36,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.surgemusic.app.downloads.DownloadFilesCleaner
 import com.surgemusic.app.downloads.NoopDownloadFilesCleaner
-import com.surgemusic.app.ui.components.CyberChip
-import com.surgemusic.app.ui.components.CyberPanel
-import com.surgemusic.app.ui.components.CyberTextButton
+import com.surgemusic.app.ui.components.SurgeChip
+import com.surgemusic.app.ui.components.SurgeConfirmDialog
+import com.surgemusic.app.ui.components.SurgePanel
+import com.surgemusic.app.ui.components.SurgeTextButton
 import com.surgemusic.app.ui.components.MediaFormatChips
+import com.surgemusic.app.ui.components.SurgeResultBanner
 import com.surgemusic.core.downloads.DownloadItem
 import com.surgemusic.core.downloads.DownloadManager
 import com.surgemusic.core.downloads.DownloadState
@@ -116,12 +119,19 @@ class DownloadsViewModel(
     }
 }
 
+/** Centered content cap for wide windows — beyond this the card grid just widens margins. */
+private val MaxContentWidth = 1080.dp
+
 /**
  * Downloads tab (plan Task 8): one card per queue item — title, forum, progress bar,
  * status chip, speed + peers while downloading, Pause/Resume toggle and Cancel;
  * terminal cards add Remove (and Delete files when DONE). The header offers
  * Clear history and Delete all files (the latter behind a confirmation). Empty state:
- * "No downloads yet — search for music".
+ * "No downloads yet — find a movie, album or show".
+ *
+ * Tablet/desktop: the cards flow into an adaptive grid (one ~340dp+ card per column, so
+ * phones stay single-column while tablets get two or three), and the whole column is
+ * capped at [MaxContentWidth] and centered so cards don't stretch absurdly on wide windows.
  */
 @Composable
 fun DownloadsScreen(
@@ -132,7 +142,7 @@ fun DownloadsScreen(
 
     if (items.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CyberPanel(modifier = Modifier.padding(24.dp)) {
+            SurgePanel(modifier = Modifier.padding(24.dp)) {
                 Column(
                     modifier = Modifier.padding(8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -145,7 +155,7 @@ fun DownloadsScreen(
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = "No downloads yet — search for music",
+                        text = "No downloads yet — find a movie, album or show",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -160,44 +170,48 @@ fun DownloadsScreen(
     var pendingDeleteItem by remember { mutableStateOf<DownloadItem?>(null) }
     var showDeleteAll by remember { mutableStateOf(false) }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        message?.let { text ->
-            ResultBanner(text = text, onDismiss = viewModel::consumeMessage)
-        }
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(modifier = Modifier.fillMaxSize().widthIn(max = MaxContentWidth)) {
+            message?.let { text ->
+                SurgeResultBanner(text = text, onDismiss = viewModel::consumeMessage)
+            }
 
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Spacer(Modifier.weight(1f))
-            CyberTextButton(text = "Clear history", onClick = viewModel::clearCompleted)
-            CyberTextButton(
-                text = "Delete all files",
-                onClick = { showDeleteAll = true },
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(start = 16.dp),
-            )
-        }
-
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(items, key = { it.request.id }) { item ->
-                DownloadCard(
-                    item = item,
-                    onPause = { viewModel.pause(item.request.id) },
-                    onResume = { viewModel.resume(item.request.id) },
-                    onCancel = { viewModel.cancel(item.request.id) },
-                    onRemove = { viewModel.remove(item.request.id) },
-                    onDeleteFiles = { pendingDeleteItem = item },
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Spacer(Modifier.weight(1f))
+                SurgeTextButton(text = "Clear history", onClick = viewModel::clearCompleted)
+                SurgeTextButton(
+                    text = "Delete all files",
+                    onClick = { showDeleteAll = true },
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(start = 16.dp),
                 )
+            }
+
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 340.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                items(items, key = { it.request.id }) { item ->
+                    DownloadCard(
+                        item = item,
+                        onPause = { viewModel.pause(item.request.id) },
+                        onResume = { viewModel.resume(item.request.id) },
+                        onCancel = { viewModel.cancel(item.request.id) },
+                        onRemove = { viewModel.remove(item.request.id) },
+                        onDeleteFiles = { pendingDeleteItem = item },
+                    )
+                }
             }
         }
     }
 
     pendingDeleteItem?.let { item ->
-        ConfirmDeleteDialog(
+        SurgeConfirmDialog(
             text = "Delete the downloaded files for this item from your device?",
             onConfirm = {
                 pendingDeleteItem = null
@@ -208,8 +222,8 @@ fun DownloadsScreen(
     }
 
     if (showDeleteAll) {
-        ConfirmDeleteDialog(
-            text = "Delete ALL files SurgeMusic downloaded? This cannot be undone.",
+        SurgeConfirmDialog(
+            text = "Delete ALL files Surge Media downloaded? This cannot be undone.",
             onConfirm = {
                 showDeleteAll = false
                 viewModel.deleteAllFiles()
@@ -229,7 +243,7 @@ private fun DownloadCard(
     onDeleteFiles: () -> Unit,
 ) {
     val active = item.state in ACTIVE_STATES
-    CyberPanel(
+    SurgePanel(
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
     ) {
@@ -262,16 +276,16 @@ private fun DownloadCard(
             modifier = Modifier.padding(top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CyberChip(text = statusText(item.state), color = statusColor(item.state))
+            SurgeChip(text = statusText(item.state), color = statusColor(item.state))
             Spacer(Modifier.weight(1f))
             if (item.state == DownloadState.DOWNLOADING) {
-                CyberTextButton(text = "Pause", onClick = onPause)
+                SurgeTextButton(text = "Pause", onClick = onPause)
             }
             if (item.state == DownloadState.PAUSED) {
-                CyberTextButton(text = "Resume", onClick = onResume)
+                SurgeTextButton(text = "Resume", onClick = onResume)
             }
             if (active) {
-                CyberTextButton(
+                SurgeTextButton(
                     text = "Cancel",
                     onClick = onCancel,
                     tint = MaterialTheme.colorScheme.error,
@@ -279,14 +293,14 @@ private fun DownloadCard(
                 )
             }
             if (item.state in TERMINAL_STATES) {
-                CyberTextButton(
+                SurgeTextButton(
                     text = "Remove",
                     onClick = onRemove,
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
             if (item.state == DownloadState.DONE) {
-                CyberTextButton(
+                SurgeTextButton(
                     text = "Delete files",
                     onClick = onDeleteFiles,
                     tint = MaterialTheme.colorScheme.error,
@@ -364,59 +378,3 @@ private val ACTIVE_STATES =
 
 private val TERMINAL_STATES =
     setOf(DownloadState.DONE, DownloadState.FAILED, DownloadState.CANCELLED)
-
-/** One-line, tap-to-dismiss result banner for delete/cleanup outcomes. */
-@Composable
-private fun ResultBanner(text: String, onDismiss: () -> Unit) {
-    CyberPanel(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onDismiss,
-            ),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-/** Material3 confirmation for destructive file deletes; cyber-styled buttons. */
-@Composable
-private fun ConfirmDeleteDialog(
-    text: String,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "Delete files".uppercase(),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        },
-        text = {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
-        confirmButton = {
-            CyberTextButton(text = "Delete", onClick = onConfirm, tint = MaterialTheme.colorScheme.error)
-        },
-        dismissButton = {
-            CyberTextButton(text = "Cancel", onClick = onDismiss)
-        },
-    )
-}

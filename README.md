@@ -1,8 +1,9 @@
-# SurgeMusic
+# Surge Media
 
-Search rutracker.org for music (artists, albums, songs) and download it with a
-built-in torrent client into folders your music players can see. Android app +
-macOS desktop from one Kotlin Multiplatform codebase.
+Search rutracker.org for movies, video, music and books, and download them with a
+built-in torrent client straight into your media libraries (audio → `Music/`,
+video → `Movies/`). Dark and light themes (System / Light / Dark in Settings).
+Android app + macOS desktop from one Kotlin Multiplatform codebase.
 
 **Status:** Phase 3 — shared core + desktop CLI (Phase 1) and the Android app
 (Phase 3) are live-verified against rutracker.org. The desktop UI comes next

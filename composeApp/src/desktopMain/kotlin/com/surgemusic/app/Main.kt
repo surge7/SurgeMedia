@@ -19,7 +19,7 @@ import com.surgemusic.app.ui.login.DesktopLoginScreen
 fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
-        title = "SurgeMusic",
+        title = "Surge Media",
         state = rememberWindowState(
             width = 1080.dp,
             height = 720.dp,
@@ -28,11 +28,12 @@ fun main() = application {
             position = WindowPosition(Alignment.Center),
         ),
     ) {
-        // App() applies SurgeMusicTheme itself (commonMain App.kt) — wrapping again here
+        // App() applies SurgeMediaTheme itself (commonMain App.kt) — wrapping again here
         // would double-apply the theme; androidMain's setContent calls it bare as well.
         App(
             searchViewModel = AppContainer.searchViewModel,
             downloadsViewModel = AppContainer.downloadsViewModel,
+                libraryViewModel = AppContainer.libraryViewModel,
             settingsViewModel = AppContainer.settingsViewModel,
             sessionRepository = AppContainer.sessionStore,
             loginOverlay = { onFinished -> DesktopLoginScreen(onFinished = { onFinished(false) }) },

@@ -70,15 +70,15 @@ internal object MediaFiles {
      * but images may only live under `Pictures/`, `DCIM/`, `Download/`… — a `Music/…`
      * path on the Images collection throws and (before this was per-file-isolated)
      * failed the whole finalize after the audio had already copied. Cover art therefore
-     * lands in `Pictures/SurgeMusic/<album>/` (verified on emulator 2026-10-12), video
-     * in `Movies/SurgeMusic/<album>/` (same collection-root rule for Video).
+     * lands in `Pictures/SurgeMedia/<album>/` (verified on emulator 2026-10-12), video
+     * in `Movies/SurgeMedia/<album>/` (same collection-root rule for Video).
      */
     internal fun relativePathFor(kind: String, albumDir: String, fileDir: File?, torrentDir: File): String {
         val sub = fileDir?.toRelativeString(torrentDir) ?: ""
         val rootDir = when (kind) {
-            KIND_AUDIO -> "Music/SurgeMusic"
-            KIND_IMAGE -> "Pictures/SurgeMusic"
-            else -> "Movies/SurgeMusic"
+            KIND_AUDIO -> "Music/SurgeMedia"
+            KIND_IMAGE -> "Pictures/SurgeMedia"
+            else -> "Movies/SurgeMedia"
         }
         val path = "$rootDir/$albumDir/$sub".replace("//", "/")
         return if (path.endsWith("/")) path else "$path/"
@@ -86,11 +86,11 @@ internal object MediaFiles {
 }
 
 /**
- * Moves a finished torrent's staged files into the public music library
- * (`Music/SurgeMusic/<sanitized title>/…`) via MediaStore (spec §6): per file
- * insert with `IS_PENDING=1` → stream copy → `IS_PENDING=0`, so MediaScanner
- * picks each file up. Non-media files are skipped; the staging tree is deleted
- * afterwards. Runs off the main thread; any failure surfaces as `Result.failure`.
+ * Moves a finished torrent's staged files into the public media libraries
+ * (`Music/SurgeMedia/…`, `Movies/SurgeMedia/…`, `Pictures/SurgeMedia/…`) via MediaStore
+ * (spec §6): per file insert with `IS_PENDING=1` → stream copy → `IS_PENDING=0`, so
+ * MediaScanner picks each file up. Non-media files are skipped; the staging tree is
+ * deleted afterwards. Runs off the main thread; any failure surfaces as `Result.failure`.
  */
 class MediaStoreFinalizer(private val context: Context) {
 
@@ -138,9 +138,9 @@ class MediaStoreFinalizer(private val context: Context) {
                             val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
                             context.contentResolver.update(uri, done, null, null)
                             rootsWritten += when (kind) {
-                                MediaFiles.KIND_AUDIO -> "Music/SurgeMusic"
-                                MediaFiles.KIND_IMAGE -> "Pictures/SurgeMusic"
-                                else -> "Movies/SurgeMusic"
+                                MediaFiles.KIND_AUDIO -> "Music/SurgeMedia"
+                                MediaFiles.KIND_IMAGE -> "Pictures/SurgeMedia"
+                                else -> "Movies/SurgeMedia"
                             }
                         }.isSuccess
                         if (ok) copied++ else failedFiles.add(f.name)

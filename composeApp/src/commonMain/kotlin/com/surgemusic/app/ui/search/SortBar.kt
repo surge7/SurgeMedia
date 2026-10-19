@@ -30,7 +30,7 @@ private val SortChipShape = CutCornerShape(topStart = 6.dp, bottomEnd = 6.dp)
  *
  * A tiny "SORT" label followed by one selectable chip per [SearchSort], in a horizontally
  * scrollable row so it fits narrow phones; the whole bar stays ≤ 40dp tall. Chips are kin to
- * [com.surgemusic.app.ui.components.CyberChip] (transparent, 1dp outlined, uppercase
+ * [com.surgemusic.app.ui.components.SurgeChip] (transparent, 1dp outlined, uppercase
  * `labelSmall`) but selectable: the selected chip gets the primary border/text plus a faint
  * primary wash, unselected ones tone down to `onSurfaceVariant`.
  */

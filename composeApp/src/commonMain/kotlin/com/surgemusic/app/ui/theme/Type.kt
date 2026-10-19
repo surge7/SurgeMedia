@@ -7,8 +7,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
-/** CyberDeck type scale — built-in font families only; monospace for terminal-style labels. */
-val CyberTypography = Typography(
+/** Surge type scale — built-in font families only; monospace for terminal-style labels. */
+val SurgeTypography = Typography(
     headlineMedium = TextStyle(fontWeight = FontWeight.Bold, fontSize = 28.sp, letterSpacing = 0.04.em),
     titleLarge = TextStyle(fontWeight = FontWeight.Bold, fontSize = 20.sp, letterSpacing = 0.05.em),
     titleMedium = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 17.sp, letterSpacing = 0.06.em),

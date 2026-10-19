@@ -26,11 +26,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.surgemusic.app.AppContainer
-import com.surgemusic.app.ui.components.CyberButton
-import com.surgemusic.app.ui.components.CyberPanel
-import com.surgemusic.app.ui.components.CyberTextField
-import com.surgemusic.app.ui.components.CyberTextButton
-import com.surgemusic.app.ui.theme.CyberCyan
+import com.surgemusic.app.ui.components.SurgeButton
+import com.surgemusic.app.ui.components.SurgePanel
+import com.surgemusic.app.ui.components.SurgeTextField
+import com.surgemusic.app.ui.components.SurgeTextButton
 import com.surgemusic.core.tracker.jvm.RutrackerClient
 import kotlinx.coroutines.launch
 
@@ -60,17 +59,17 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
         color = MaterialTheme.colorScheme.background,
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CyberPanel(
+            SurgePanel(
                 modifier = Modifier.widthIn(max = 480.dp).padding(16.dp),
                 contentPadding = PaddingValues(20.dp),
             ) {
-                // CyberTopBar look: cyan accent bar + uppercase titleMedium.
+                // SurgeTopBar look: primary accent bar + uppercase titleMedium.
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
                             .width(2.dp)
                             .height(18.dp)
-                            .background(CyberCyan),
+                            .background(MaterialTheme.colorScheme.primary),
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
@@ -87,7 +86,7 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
                 )
-                CyberTextField(
+                SurgeTextField(
                     value = cookieHeader,
                     onValueChange = { cookieHeader = it },
                     label = "Cookie header",
@@ -95,7 +94,7 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                     minLines = 2,
                     maxLines = 4,
                 )
-                CyberTextField(
+                SurgeTextField(
                     value = userAgent,
                     onValueChange = { userAgent = it },
                     label = "User-Agent",
@@ -108,8 +107,8 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    CyberTextButton(text = "CANCEL", onClick = onFinished)
-                    CyberButton(
+                    SurgeTextButton(text = "CANCEL", onClick = onFinished)
+                    SurgeButton(
                         text = "SAVE SESSION",
                         onClick = {
                             checking = true

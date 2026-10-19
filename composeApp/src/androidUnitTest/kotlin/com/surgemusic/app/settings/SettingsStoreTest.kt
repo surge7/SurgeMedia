@@ -1,5 +1,6 @@
 package com.surgemusic.app.settings
 
+import com.surgemusic.app.ThemeMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -38,6 +39,7 @@ class SettingsStoreTest {
         assertEquals(true, settings.wifiOnly.value)
         assertEquals("https://rutracker.org", settings.mirror.value)
         assertEquals(3, settings.concurrentDownloads.value)
+        assertEquals(ThemeMode.SYSTEM, settings.themeMode.value)
     }
 
     @Test
@@ -48,15 +50,26 @@ class SettingsStoreTest {
         settings.setWifiOnly(false)
         settings.setMirror("https://rutracker.net")
         settings.setConcurrentDownloads(5)
+        settings.setThemeMode(ThemeMode.LIGHT)
 
         assertEquals(false, settings.wifiOnly.value)
         assertEquals("https://rutracker.net", settings.mirror.value)
         assertEquals(5, settings.concurrentDownloads.value)
+        assertEquals(ThemeMode.LIGHT, settings.themeMode.value)
 
         val reloaded = SettingsStore(store) // same backing store, fresh instance
         assertEquals(false, reloaded.wifiOnly.value)
         assertEquals("https://rutracker.net", reloaded.mirror.value)
         assertEquals(5, reloaded.concurrentDownloads.value)
+        assertEquals(ThemeMode.LIGHT, reloaded.themeMode.value)
+    }
+
+    @Test
+    fun unknownPersistedThemeModeFallsBackToSystem() {
+        val store = InMemoryKeyValueStore()
+        store.putString("theme_mode", "SEPIA") // hand-edited / from a future build
+
+        assertEquals(ThemeMode.SYSTEM, SettingsStore(store).themeMode.value)
     }
 
     @Test

@@ -11,13 +11,14 @@ import kotlinx.coroutines.withContext
 
 /**
  * Deletes finalized download files from the public MediaStore roots the app writes to
- * (spec §6): `Music/SurgeMusic/<album>/…` on the Audio collection, cover art under
- * `Pictures/SurgeMusic/…` on Images, video under `Movies/SurgeMusic/…` on Video —
- * all on [MediaStore.VOLUME_EXTERNAL_PRIMARY].
+ * (spec §6): `Music/SurgeMedia/<album>/…` on the Audio collection, cover art under
+ * `Pictures/SurgeMedia/…` on Images, video under `Movies/SurgeMedia/…` on Video — all
+ * on [MediaStore.VOLUME_EXTERNAL_PRIMARY]. The pre-rebrand `SurgeMusic` roots are
+ * swept too, so files finalized by older builds stay deletable.
  *
  * Query strategy (deliberate): selections only ever bind FIXED `RELATIVE_PATH LIKE
- * 'Music/SurgeMusic/%'` prefixes — never a pattern built from the item title — and the
- * album match is a plain Kotlin [String.startsWith] on the fetched RELATIVE_PATH, so a
+ * '<root>/%'` prefixes — never a pattern built from the item title — and the album
+ * match is a plain Kotlin [String.startsWith] on the fetched RELATIVE_PATH, so a
  * torrent title containing SQL LIKE wildcards (`%`, `_`) cannot widen what gets
  * deleted. Rows are then deleted one by one by `_id`.
  *
@@ -30,11 +31,14 @@ import kotlinx.coroutines.withContext
  */
 class MediaStoreCleaner(private val context: Context) : DownloadFilesCleaner {
 
-    /** (MediaStore collection, fixed relative-path root) pairs the finalizer writes to. */
+    /** (MediaStore collection, fixed relative-path root) pairs the finalizer writes to — new + legacy. */
     private val roots: List<Pair<Uri, String>> = listOf(
         MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) to ROOT_AUDIO,
         MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) to ROOT_IMAGES,
         MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) to ROOT_VIDEO,
+        MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) to LEGACY_AUDIO,
+        MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) to LEGACY_IMAGES,
+        MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) to LEGACY_VIDEO,
     )
 
     override suspend fun deleteFor(item: DownloadItem): Result<Int> = runCatching {
@@ -97,8 +101,11 @@ class MediaStoreCleaner(private val context: Context) : DownloadFilesCleaner {
     }
 
     private companion object {
-        const val ROOT_AUDIO = "Music/SurgeMusic/"
-        const val ROOT_IMAGES = "Pictures/SurgeMusic/"
-        const val ROOT_VIDEO = "Movies/SurgeMusic/"
+        const val ROOT_AUDIO = "Music/SurgeMedia/"
+        const val ROOT_IMAGES = "Pictures/SurgeMedia/"
+        const val ROOT_VIDEO = "Movies/SurgeMedia/"
+        const val LEGACY_AUDIO = "Music/SurgeMusic/" // pre-rebrand builds
+        const val LEGACY_IMAGES = "Pictures/SurgeMusic/"
+        const val LEGACY_VIDEO = "Movies/SurgeMusic/"
     }
 }

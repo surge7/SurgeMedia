@@ -25,9 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.surgemusic.app.AppContainer
-import com.surgemusic.app.ui.components.CyberTextButton
-import com.surgemusic.app.ui.theme.CyberCyan
-import com.surgemusic.app.ui.theme.CyberGrid
+import com.surgemusic.app.ui.components.SurgeTextButton
 
 private const val LOGIN_URL = "https://rutracker.org/forum/login.php"
 // Must be a /forum/ URL: rutracker's bb_session cookie is path-scoped to /forum/,
@@ -55,8 +53,8 @@ fun WebViewLoginScreen(onFinished: (Boolean) -> Unit) {
         color = MaterialTheme.colorScheme.background,
     ) {
         Column {
-            // Cyberpunk top bar matching CyberTopBar (commonMain): cyan accent bar +
-            // uppercase title, with the existing Cancel action as a CyberTextButton.
+            // Top bar matching SurgeTopBar (commonMain): primary accent bar +
+            // uppercase title, with the existing Cancel action as a SurgeTextButton.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -67,7 +65,7 @@ fun WebViewLoginScreen(onFinished: (Boolean) -> Unit) {
                     modifier = Modifier
                         .width(2.dp)
                         .height(18.dp)
-                        .background(CyberCyan),
+                        .background(MaterialTheme.colorScheme.primary),
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
@@ -76,13 +74,13 @@ fun WebViewLoginScreen(onFinished: (Boolean) -> Unit) {
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.weight(1f))
-                CyberTextButton(text = "Cancel", onClick = { onFinished(false) })
+                SurgeTextButton(text = "Cancel", onClick = { onFinished(false) })
             }
             AndroidView(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(16.dp)
-                    .border(1.dp, CyberGrid),
+                    .border(1.dp, MaterialTheme.colorScheme.outline),
                 factory = { context ->
                     WebView(context).apply {
                         layoutParams = ViewGroup.LayoutParams(

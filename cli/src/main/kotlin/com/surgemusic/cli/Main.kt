@@ -22,7 +22,7 @@ fun main(args: Array<String>) = runBlocking {
         // usage() returns Nothing, so the labelled return is well-typed and equivalent.
         "search" -> cmdSearch(args.getOrNull(1) ?: return@runBlocking usage("search requires a query"))
         "download" -> cmdDownload(args.drop(1))
-        "version" -> println("SurgeMusic ${Version.APP}")
+        "version" -> println("Surge Media ${Version.APP}")
         else -> usage(null)
     }
 }
@@ -172,7 +172,7 @@ private fun usage(error: String?): Nothing {
     error?.let { System.err.println("error: $it") }
     println(
         """
-        SurgeMusic ${Version.APP}
+        Surge Media ${Version.APP}
         usage:
           surgemusic session                  validate the imported browser session
           surgemusic login                    password login (mirrors without Cloudflare)

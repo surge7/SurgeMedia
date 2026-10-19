@@ -63,7 +63,7 @@ class MediaFilesTest {
             fileDir = File("/staging/6918211/TorrentName/CD1"),
             torrentDir = File("/staging/6918211/TorrentName"),
         )
-        assertEquals("Music/SurgeMusic/Artist - Album (2020)/CD1/", path)
+        assertEquals("Music/SurgeMedia/Artist - Album (2020)/CD1/", path)
     }
 
     @Test
@@ -74,7 +74,7 @@ class MediaFilesTest {
             fileDir = File("/staging/1/T/a/b"),
             torrentDir = File("/staging/1/T"),
         )
-        assertEquals("Music/SurgeMusic/Album/a/b/", path)
+        assertEquals("Music/SurgeMedia/Album/a/b/", path)
     }
 
     @Test
@@ -85,7 +85,7 @@ class MediaFilesTest {
             fileDir = File("/staging/1/T"),
             torrentDir = File("/staging/1/T"),
         )
-        assertEquals("Music/SurgeMusic/Album/", path)
+        assertEquals("Music/SurgeMedia/Album/", path)
     }
 
     @Test
@@ -96,7 +96,7 @@ class MediaFilesTest {
             fileDir = null,
             torrentDir = File("/staging/1/T"),
         )
-        assertEquals("Music/SurgeMusic/Album/", path)
+        assertEquals("Music/SurgeMedia/Album/", path)
     }
 
     @Test
@@ -109,7 +109,7 @@ class MediaFilesTest {
             fileDir = File("/staging/1/T"),
             torrentDir = File("/staging/1/T"),
         )
-        assertEquals("Pictures/SurgeMusic/Album/", path)
+        assertEquals("Pictures/SurgeMedia/Album/", path)
     }
 
     @Test
@@ -120,7 +120,7 @@ class MediaFilesTest {
             fileDir = null,
             torrentDir = File("/staging/1/T"),
         )
-        assertEquals("Music/SurgeMusic/", path)
+        assertEquals("Music/SurgeMedia/", path)
     }
 
     @Test
@@ -149,6 +149,6 @@ class MediaFilesTest {
             null,
             File("/torrent"),
         )
-        assertEquals("Movies/SurgeMusic/Pink Floyd - Pompeii/", dir)
+        assertEquals("Movies/SurgeMedia/Pink Floyd - Pompeii/", dir)
     }
 }

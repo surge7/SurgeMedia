@@ -57,7 +57,7 @@ private val MediaKind.labelText: String
         MediaKind.UNKNOWN -> "?"
     }
 
-/** Border-only single-line chip matching CyberChip's look, with ellipsized text. */
+/** Border-only single-line chip matching SurgeChip's look, with ellipsized text. */
 @Composable
 private fun MediaChip(text: String, color: Color, modifier: Modifier = Modifier) {
     Box(

@@ -5,7 +5,7 @@ import com.surgemusic.core.downloads.DownloadItem
 /**
  * Platform seam for deleting the files a finished download finalized onto the device
  * (spec §6 roots): androidMain implements it over MediaStore ([MediaStoreCleaner]),
- * desktopMain over `~/Music/SurgeMusic` (`DesktopFileCleaner`).
+ * desktopMain over `~/Music/SurgeMedia` + `~/Movies/SurgeMedia` (`DesktopFileCleaner`).
  *
  * All methods return [Result] so the Downloads screen can banner the count or the
  * failure without exceptions crossing the boundary; a successful 0 means "nothing

@@ -5,8 +5,10 @@ import com.surgemusic.app.downloads.DesktopFinalizer
 import com.surgemusic.app.session.FileSessionStore
 import com.surgemusic.app.session.SessionRepository
 import com.surgemusic.app.settings.DesktopSettingsStore
+import com.surgemusic.app.downloads.DesktopLibrary
 import com.surgemusic.app.ui.downloads.DownloadsViewModel
 import com.surgemusic.app.ui.search.SearchViewModel
+import com.surgemusic.app.ui.library.LibraryViewModel
 import com.surgemusic.app.ui.settings.SettingsViewModel
 import com.surgemusic.core.downloads.DownloadManager
 import com.surgemusic.core.downloads.DownloadRequest
@@ -79,7 +81,7 @@ object AppContainer {
 
     /**
      * Download queue: the finalize hook moves a finished torrent's staged files into
-     * `~/Music/SurgeMusic/<sanitized title>` via [DesktopFinalizer] (desktop twin of
+     * `~/Music/SurgeMedia/<sanitized title>` (audio) or `~/Movies/SurgeMedia/…` (video) via [DesktopFinalizer] (desktop twin of
      * MediaStoreFinalizer, spec §6 without MediaStore).
      */
     val downloadManager: DownloadManager by lazy {
@@ -92,6 +94,9 @@ object AppContainer {
 
     /** Downloads view model for the Downloads tab (file deletion via DesktopFileCleaner). */
     val downloadsViewModel: DownloadsViewModel by lazy { DownloadsViewModel(downloadManager, DesktopFileCleaner) }
+
+    /** Downloaded tab (finalized files on the media libraries). */
+    val libraryViewModel: LibraryViewModel by lazy { LibraryViewModel(DesktopLibrary) }
 
     /**
      * Settings view model for the Settings tab: session management + manual import over

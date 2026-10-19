@@ -1,5 +1,7 @@
 package com.surgemusic.app.settings
 
+import com.surgemusic.app.ThemeMode
+import com.surgemusic.app.themeModeOf
 import com.surgemusic.app.ui.settings.AppSettings
 import java.nio.file.Files
 import java.nio.file.Path
@@ -15,8 +17,8 @@ import kotlinx.coroutines.launch
 /**
  * App settings on desktop (plan Task 6): `java.util.Properties` persisted at
  * `~/.surgemusic/settings.properties`. Same defaults as androidMain's `SettingsStore` —
- * Wi-Fi only = on, mirror = `https://rutracker.org`, 3 concurrent downloads — and the same
- * keys, so a hand-copied file ports between platforms.
+ * Wi-Fi only = on, mirror = `https://rutracker.org`, 3 concurrent downloads, theme =
+ * System — and the same keys, so a hand-copied file ports between platforms.
  *
  * Write discipline (desktop twin of androidMain's SharedPreferences `apply()`, which never
  * touches disk on the calling thread): setters mutate the in-memory [Properties] and emit
@@ -48,6 +50,9 @@ class DesktopSettingsStore(
     private val _concurrentDownloads = MutableStateFlow(readConcurrentDownloads())
     override val concurrentDownloads: StateFlow<Int> = _concurrentDownloads.asStateFlow()
 
+    private val _themeMode = MutableStateFlow(themeModeOf(props.getProperty(KEY_THEME_MODE)))
+    override val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+
     override fun setWifiOnly(enabled: Boolean) {
         val snapshot = synchronized(ioLock) {
             props.setProperty(KEY_WIFI_ONLY, enabled.toString())
@@ -72,6 +77,15 @@ class DesktopSettingsStore(
         val snapshot = synchronized(ioLock) {
             props.setProperty(KEY_CONCURRENT_DOWNLOADS, clamped.toString())
             _concurrentDownloads.value = clamped
+            props.clone() as Properties
+        }
+        flushAsync(snapshot)
+    }
+
+    override fun setThemeMode(mode: ThemeMode) {
+        val snapshot = synchronized(ioLock) {
+            props.setProperty(KEY_THEME_MODE, mode.name)
+            _themeMode.value = mode
             props.clone() as Properties
         }
         flushAsync(snapshot)
@@ -108,6 +122,7 @@ class DesktopSettingsStore(
         const val KEY_WIFI_ONLY = "wifi_only"
         const val KEY_MIRROR = "mirror"
         const val KEY_CONCURRENT_DOWNLOADS = "concurrent_downloads"
+        const val KEY_THEME_MODE = "theme_mode"
         const val DEFAULT_WIFI_ONLY = true
         const val DEFAULT_MIRROR = "https://rutracker.org"
         const val DEFAULT_CONCURRENT_DOWNLOADS = 3

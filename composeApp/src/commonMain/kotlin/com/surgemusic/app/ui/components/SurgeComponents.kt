@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -21,6 +22,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,18 +47,20 @@ import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
-import com.surgemusic.app.ui.theme.CyberCyan
-import com.surgemusic.app.ui.theme.CyberGrid
-import com.surgemusic.app.ui.theme.CyberSurface
-import com.surgemusic.app.ui.theme.CyberSurfaceAlt
+
+/**
+ * Surge design system primitives. Every color is read from [MaterialTheme.colorScheme] —
+ * the components render identically in the dark and light Surge Media schemes.
+ */
 
 /** Default chamfer for glow/panel primitives — mirrors `MaterialTheme.shapes.medium`. */
 private val MediumCut = CutCornerShape(topStart = 10.dp, bottomEnd = 10.dp)
 
 /** Neon outline glow: four concentric [Stroke] passes fading outward from [shape]'s edge. */
-fun Modifier.cyberGlow(
+fun Modifier.surgeGlow(
     color: Color,
     shape: Shape = MediumCut,
     alpha: Float = 1f,
@@ -73,20 +78,29 @@ fun Modifier.cyberGlow(
     }
 }
 
-/** Fills [shape] with the dark panel surface and a 1dp grid-line stroke. */
-fun Modifier.cyberPanel(shape: Shape = MediumCut): Modifier = drawBehind {
-    val outline = shape.createOutline(size, layoutDirection, this)
-    drawOutline(outline = outline, color = CyberSurface)
-    drawOutline(
-        outline = outline,
-        color = CyberGrid,
-        style = Stroke(width = 1.dp.toPx()),
-    )
+/**
+ * Fills [shape] with the themed surface and a 1dp outline stroke. Composable so it can
+ * read the active color scheme — call it inside composition (like any other modifier
+ * factory that depends on theme state).
+ */
+@Composable
+fun Modifier.surgePanel(shape: Shape = MediumCut): Modifier {
+    val fill = MaterialTheme.colorScheme.surface
+    val stroke = MaterialTheme.colorScheme.outline
+    return drawBehind {
+        val outline = shape.createOutline(size, layoutDirection, this)
+        drawOutline(outline = outline, color = fill)
+        drawOutline(
+            outline = outline,
+            color = stroke,
+            style = Stroke(width = 1.dp.toPx()),
+        )
+    }
 }
 
-/** Chamfered primary action; [emphasis] fills solid cyan, otherwise a dim cyan wash. */
+/** Chamfered primary action; [emphasis] fills solid primary, otherwise a dim primary wash. */
 @Composable
-fun CyberButton(
+fun SurgeButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -104,7 +118,7 @@ fun CyberButton(
                 scaleY = if (pressed) 0.98f else 1f
             }
             .alpha(if (enabled) 1f else 0.4f)
-            .cyberGlow(
+            .surgeGlow(
                 color = primary,
                 shape = MediumCut,
                 alpha = if (pressed) 0.45f else if (emphasis) 0.6f else 0.25f,
@@ -131,7 +145,7 @@ fun CyberButton(
 
 /** Uppercase label-style text button tinted [tint]; dims when disabled. */
 @Composable
-fun CyberTextButton(
+fun SurgeTextButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -152,9 +166,9 @@ fun CyberTextButton(
     )
 }
 
-/** Outlined text field with cyan focus border, dim grid rest border and transparent container. */
+/** Outlined text field with primary focus border, dim outline rest state and transparent container. */
 @Composable
-fun CyberTextField(
+fun SurgeTextField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
@@ -203,22 +217,22 @@ fun CyberTextField(
     )
 }
 
-/** Surface panel container with chamfered edges, grid border and [contentPadding]. */
+/** Surface panel container with chamfered edges, outline border and [contentPadding]. */
 @Composable
-fun CyberPanel(
+fun SurgePanel(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(16.dp),
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
-        modifier = modifier.cyberPanel().padding(contentPadding),
+        modifier = modifier.surgePanel().padding(contentPadding),
         content = content,
     )
 }
 
-/** Uppercase cyan section label with wide tracking. */
+/** Uppercase primary section label with wide tracking. */
 @Composable
-fun CyberSectionHeader(title: String, modifier: Modifier = Modifier) {
+fun SurgeSectionHeader(title: String, modifier: Modifier = Modifier) {
     Text(
         text = title.uppercase(),
         style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.2.em),
@@ -229,7 +243,7 @@ fun CyberSectionHeader(title: String, modifier: Modifier = Modifier) {
 
 /** Transparent chip with a 1dp border in [color]. */
 @Composable
-fun CyberChip(text: String, color: Color, modifier: Modifier = Modifier) {
+fun SurgeChip(text: String, color: Color, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .clip(MaterialTheme.shapes.small)
@@ -245,9 +259,62 @@ fun CyberChip(text: String, color: Color, modifier: Modifier = Modifier) {
     }
 }
 
-/** 1dp horizontal scanline fading from cyan to transparent. */
+/**
+ * Single-select segmented control (used for Settings ▸ Appearance): one outlined segment
+ * per [option], the selected segment filled with the primary wash + primary border, the
+ * rest outlined in `onSurfaceVariant`. Same visual language as [SurgeChip], but wide
+ * enough for a label and touch target.
+ */
+@Composable
+fun <T> SurgeSegmentedControl(
+    options: List<T>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    label: (T) -> String,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier = modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, option ->
+            val isSelected = option == selected
+            val tint = if (isSelected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = if (index == 0) 0.dp else 6.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .background(
+                        if (isSelected) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                        } else {
+                            Color.Transparent
+                        },
+                    )
+                    .border(1.dp, tint, MaterialTheme.shapes.small)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { if (!isSelected) onSelect(option) }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label(option).uppercase(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = tint,
+                )
+            }
+        }
+    }
+}
+
+/** 1dp horizontal accent rule fading from primary to transparent. */
 @Composable
 fun ScanlineDivider(modifier: Modifier = Modifier) {
+    val accent = MaterialTheme.colorScheme.primary
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -255,7 +322,25 @@ fun ScanlineDivider(modifier: Modifier = Modifier) {
             .drawBehind {
                 drawRect(
                     brush = Brush.horizontalGradient(
-                        listOf(CyberCyan.copy(alpha = 0.25f), Color.Transparent),
+                        listOf(accent.copy(alpha = 0.25f), Color.Transparent),
+                    ),
+                )
+            },
+    )
+}
+
+/** 1dp vertical accent rule fading from primary to transparent — the two-pane list/detail seam. */
+@Composable
+fun ScanlineVerticalDivider(modifier: Modifier = Modifier) {
+    val accent = MaterialTheme.colorScheme.primary
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(1.dp)
+            .drawBehind {
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        listOf(accent.copy(alpha = 0.25f), Color.Transparent),
                     ),
                 )
             },
@@ -263,18 +348,20 @@ fun ScanlineDivider(modifier: Modifier = Modifier) {
 }
 
 /**
- * Top bar with optional back action and a cyan accent bar before the title. It carries no
+ * Top bar with optional back action and a primary accent bar before the title. It carries no
  * inset padding of its own: it renders inside the Scaffold body, whose content keeps the
- * default system-bar insets (plan Task 2), so the status-bar clearance arrives via the
- * forwarded content padding. The plan's Task-1 `statusBarsPadding()` prescription double-
- * padded under that forwarding once edge-to-edge landed (final-review F1) and was dropped
- * here; only call [CyberTopBar] inside an already-inset container.
+ * default system-bar insets, so the status-bar clearance arrives via the forwarded content
+ * padding; only call [SurgeTopBar] inside an already-inset container.
+ *
+ * [closeIcon] swaps the back arrow for an X — for panes (tablet list-detail) where the
+ * action dismisses a selection rather than navigating back.
  */
 @Composable
-fun CyberTopBar(
+fun SurgeTopBar(
     title: String,
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    closeIcon: Boolean = false,
 ) {
     Row(
         modifier = modifier
@@ -285,8 +372,12 @@ fun CyberTopBar(
         if (onBack != null) {
             IconButton(onClick = onBack) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                    contentDescription = "Back",
+                    imageVector = if (closeIcon) {
+                        Icons.Rounded.Close
+                    } else {
+                        Icons.AutoMirrored.Rounded.ArrowBack
+                    },
+                    contentDescription = if (closeIcon) "Close" else "Back",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -295,7 +386,7 @@ fun CyberTopBar(
             modifier = Modifier
                 .width(2.dp)
                 .height(18.dp)
-                .background(CyberCyan),
+                .background(MaterialTheme.colorScheme.primary),
         )
         Spacer(Modifier.width(8.dp))
         Text(
@@ -306,9 +397,9 @@ fun CyberTopBar(
     }
 }
 
-/** SnackbarHost rendering cyber-panel snackbars (surface-alt fill, grid border, cyan action). */
+/** SnackbarHost rendering surge-panel snackbars (surface-variant fill, outline border, primary action). */
 @Composable
-fun CyberSnackbarHost(hostState: SnackbarHostState, modifier: Modifier = Modifier) {
+fun SurgeSnackbarHost(hostState: SnackbarHostState, modifier: Modifier = Modifier) {
     SnackbarHost(hostState = hostState, modifier = modifier) { data ->
         val visuals = data.visuals
         val actionLabel = visuals.actionLabel
@@ -317,8 +408,8 @@ fun CyberSnackbarHost(hostState: SnackbarHostState, modifier: Modifier = Modifie
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .clip(MaterialTheme.shapes.medium)
-                .background(CyberSurfaceAlt)
-                .border(1.dp, CyberGrid, MaterialTheme.shapes.medium)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -332,7 +423,7 @@ fun CyberSnackbarHost(hostState: SnackbarHostState, modifier: Modifier = Modifie
                     Text(
                         text = actionLabel,
                         style = MaterialTheme.typography.labelLarge,
-                        color = CyberCyan,
+                        color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier
                             .padding(start = 16.dp)
                             .clickable(
@@ -344,4 +435,60 @@ fun CyberSnackbarHost(hostState: SnackbarHostState, modifier: Modifier = Modifie
             }
         }
     }
+}
+
+/** One-line, tap-to-dismiss result banner for delete/cleanup outcomes. */
+@Composable
+fun SurgeResultBanner(text: String, onDismiss: () -> Unit) {
+    SurgePanel(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss,
+            ),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Material3 confirmation for destructive file deletes; surge-styled buttons. */
+@Composable
+fun SurgeConfirmDialog(
+    text: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Delete files".uppercase(),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        },
+        text = {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        confirmButton = {
+            SurgeTextButton(text = "Delete", onClick = onConfirm, tint = MaterialTheme.colorScheme.error)
+        },
+        dismissButton = {
+            SurgeTextButton(text = "Cancel", onClick = onDismiss)
+        },
+    )
 }

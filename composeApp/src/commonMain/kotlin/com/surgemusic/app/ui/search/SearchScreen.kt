@@ -28,12 +28,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.surgemusic.app.ui.components.CyberButton
-import com.surgemusic.app.ui.components.CyberPanel
-import com.surgemusic.app.ui.components.CyberTextButton
-import com.surgemusic.app.ui.components.CyberTextField
+import com.surgemusic.app.ui.components.SurgeButton
+import com.surgemusic.app.ui.components.SurgePanel
+import com.surgemusic.app.ui.components.SurgeTextButton
+import com.surgemusic.app.ui.components.SurgeTextField
 import com.surgemusic.app.ui.components.MediaFormatChips
-import com.surgemusic.app.ui.components.cyberPanel
+import com.surgemusic.app.ui.components.surgeGlow
+import com.surgemusic.app.ui.components.surgePanel
 import com.surgemusic.core.model.MediaInfo
 import com.surgemusic.core.model.SearchResultRow
 import com.surgemusic.core.model.SizeParser
@@ -47,12 +48,16 @@ import com.surgemusic.core.model.SizeParser
  *     the platform `WebViewLoginScreen` over the tab while the login flow is active.
  * - When no session is saved, a "Log in to rutracker" hero offers login before searching.
  * - Pull-to-refresh is not required (plan).
+ * - [selectedTopicId] highlights the row currently open in the details pane — the tablet
+ *     list-detail layout keeps the list visible beside Details, so the selection must
+ *     stay legible (cyan glow border); null (compact/medium overlay mode) highlights nothing.
  */
 @Composable
 fun SearchScreen(
     viewModel: SearchViewModel,
     loggedIn: Boolean,
     modifier: Modifier = Modifier,
+    selectedTopicId: Long? = null,
     onShowDetails: (SearchResultRow) -> Unit = {},
     onLogin: () -> Unit = {},
 ) {
@@ -70,7 +75,7 @@ fun SearchScreen(
         if (!loggedIn) LoginHero(onLogin = onLogin)
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            CyberTextField(
+            SurgeTextField(
                 value = query,
                 onValueChange = viewModel::onQueryChange,
                 label = "Search rutracker",
@@ -82,7 +87,7 @@ fun SearchScreen(
                 ),
             )
             Spacer(Modifier.width(8.dp))
-            CyberButton(
+            SurgeButton(
                 text = "Search",
                 onClick = viewModel::search,
                 enabled = query.isNotBlank() && uiState !is SearchUiState.Loading,
@@ -98,7 +103,7 @@ fun SearchScreen(
         }
 
         when (val state = uiState) {
-            SearchUiState.Idle -> Hint("Type a query to search rutracker music forums.")
+            SearchUiState.Idle -> Hint("Search rutracker — movies, video, music, books and more.")
             SearchUiState.Loading -> CircularProgressIndicator(Modifier.padding(top = 16.dp))
             is SearchUiState.Error -> ErrorBanner(state, onRetry = viewModel::retry, onLogin = onLogin)
             is SearchUiState.Ready -> {
@@ -112,11 +117,15 @@ fun SearchScreen(
                             .imePadding(),
                     ) {
                         items(sorted, key = { it.topicId }) { row ->
-                            ResultRowItem(row = row, onShowDetails = onShowDetails)
+                            ResultRowItem(
+                                row = row,
+                                selected = row.topicId == selectedTopicId,
+                                onShowDetails = onShowDetails,
+                            )
                         }
                         if (state.hasMore) {
                             item {
-                                CyberButton(
+                                SurgeButton(
                                     text = "Load more",
                                     onClick = viewModel::loadMore,
                                     modifier = Modifier
@@ -134,7 +143,7 @@ fun SearchScreen(
 
 @Composable
 private fun LoginHero(onLogin: () -> Unit) {
-    CyberPanel(
+    SurgePanel(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 12.dp),
@@ -150,7 +159,7 @@ private fun LoginHero(onLogin: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
         )
-        CyberButton(
+        SurgeButton(
             text = "Log in",
             onClick = onLogin,
             modifier = Modifier.padding(top = 8.dp),
@@ -169,12 +178,24 @@ private fun Hint(text: String) {
 }
 
 @Composable
-private fun ResultRowItem(row: SearchResultRow, onShowDetails: (SearchResultRow) -> Unit) {
+private fun ResultRowItem(
+    row: SearchResultRow,
+    selected: Boolean,
+    onShowDetails: (SearchResultRow) -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
-            .cyberPanel()
+            .surgePanel()
+            // Selected (details pane open): cyan neon edge replaces the resting grid border.
+            .then(
+                if (selected) {
+                    Modifier.surgeGlow(color = MaterialTheme.colorScheme.primary, alpha = 0.8f)
+                } else {
+                    Modifier
+                },
+            )
             .clickable { onShowDetails(row) }
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -201,7 +222,11 @@ private fun ResultRowItem(row: SearchResultRow, onShowDetails: (SearchResultRow)
         Icon(
             imageVector = Icons.Rounded.ChevronRight,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
         )
     }
 }
@@ -225,9 +250,9 @@ private fun ErrorBanner(state: SearchUiState.Error, onRetry: () -> Unit, onLogin
                 .weight(1f)
                 .padding(horizontal = 8.dp),
         )
-        CyberTextButton(text = "Retry", onClick = onRetry)
+        SurgeTextButton(text = "Retry", onClick = onRetry)
         if (state.needsLogin) {
-            CyberTextButton(
+            SurgeTextButton(
                 text = "Log in",
                 onClick = onLogin,
                 modifier = Modifier.padding(start = 8.dp),
