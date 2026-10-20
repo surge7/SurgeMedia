@@ -47,6 +47,9 @@ class AppLanguageTest {
         assertEquals("1 пир", RuStrings.peersCount(1))
         assertEquals("3 пира", RuStrings.peersCount(3))
         assertEquals("5 пиров", RuStrings.peersCount(5))
+
+        // Cyrillic «с» — formatBytes units are Cyrillic, so the suffix must match the script.
+        assertEquals("2.5 МБ/с", RuStrings.speedPerSecond("2.5 МБ"))
     }
 
     @Test

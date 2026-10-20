@@ -6,4 +6,5 @@
     <string name="notification_action_pause_all">Приостановить все</string>
     <string name="notification_active_count">Активных: %1$d</string>
     <string name="notification_queued_count">В очереди: %1$d</string>
+    <string name="notification_speed_per_second">%1$s/с</string>
 </resources>

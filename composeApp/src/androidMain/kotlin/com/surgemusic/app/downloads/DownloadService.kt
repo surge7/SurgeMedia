@@ -97,7 +97,10 @@ class DownloadService : Service() {
         val downloading = items.filter { it.state == DownloadState.DOWNLOADING }
         val text = listOf(
             getString(R.string.notification_active_count, downloading.size),
-            "${SizeParser.formatBytes(downloading.sumOf { it.downloadSpeed })}/s",
+            getString(
+                R.string.notification_speed_per_second,
+                SizeParser.formatBytes(downloading.sumOf { it.downloadSpeed }),
+            ),
             getString(R.string.notification_queued_count, items.count { it.state == DownloadState.QUEUED }),
         ).joinToString(" · ")
         val pauseAllIntent = PendingIntent.getService(

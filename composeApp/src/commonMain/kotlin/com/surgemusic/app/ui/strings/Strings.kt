@@ -336,7 +336,7 @@ object RuStrings : AppStrings {
     override val emptyDownloads = "Пока нет загрузок — найдите фильм, альбом или сериал"
     override val confirmDeleteItemFiles = "Удалить скачанные файлы этого элемента с устройства?"
     override val confirmDeleteAllFiles = "Удалить ВСЕ файлы, скачанные Surge Media? Это действие нельзя отменить."
-    override fun speedPerSecond(bytes: String) = "$bytes/s"
+    override fun speedPerSecond(bytes: String) = "$bytes/с" // Cyrillic «с»: formatBytes units are already Cyrillic
     override fun peersCount(n: Int) = "$n " + ruPlural(n, "пир", "пира", "пиров")
     override fun deletedFiles(n: Int) =
         if (n % 10 == 1 && n % 100 != 11) "Удалён $n файл" else "Удалено $n " + ruPlural(n, "файл", "файла", "файлов")
