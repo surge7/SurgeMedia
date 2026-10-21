@@ -49,10 +49,9 @@ you delete it yourself.
 
 ### 5. Contact
 
-Questions about this policy: **surge7@example.com**
-
-<!-- PLACEHOLDER: replace surge7@example.com with the real support address
-     before publishing this policy to RuStore / the GitHub listing. -->
+Questions about this policy: open an issue at
+**https://github.com/surge7/SurgeMedia/issues** (or email the repository owner
+via the address shown on the GitHub profile).
 
 ---
 
@@ -106,7 +105,6 @@ Surge Media — поисковый клиент rutracker и торрент-за
 
 ### 5. Контакты
 
-Вопросы по этой политике: **surge7@example.com**
-
-<!-- PLACEHOLDER: замените surge7@example.com на настоящий адрес поддержки
-     перед публикацией этой политики в RuStore / в описании на GitHub. -->
+Вопросы по этой политике: создавайте issue в
+**https://github.com/surge7/SurgeMedia/issues** (или напишите владельцу
+репозитория по адресу, указанному в профиле GitHub).
