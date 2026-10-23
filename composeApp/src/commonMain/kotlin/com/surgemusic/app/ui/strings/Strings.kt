@@ -246,8 +246,10 @@ object EnStrings : AppStrings {
     override val languageRussian = "Русский"
     override val manualImportHeader = "Manual import (advanced)"
     override val manualImportBody =
-        "Paste the raw Cookie header and User-Agent from a logged-in desktop browser " +
-            "(devtools → Network → any forum/ request). cf_clearance is bound to the User-Agent."
+        "Paste the raw Cookie header and User-Agent copied from a browser where you are " +
+            "signed in (DevTools → Network → first request → Request Headers). " +
+            "Both values must come from the same browser — cf_clearance is bound to the " +
+            "User-Agent. Step-by-step guide for each browser: docs/LOGIN.md in the repository."
     override val cookieHeaderLabel = "Cookie header"
     override val userAgentLabel = "User-Agent"
     override val importButton = "Import"
@@ -263,9 +265,12 @@ object EnStrings : AppStrings {
     override val signInTitle = "Sign in"
     override val saveSession = "Save session"
     override val desktopLoginBody =
-        "Desktop has no embedded browser. Open the tracker in your browser, " +
-            "sign in, then copy the request's Cookie header (F12 → Network → any request " +
-            "→ request headers → cookie) and your browser's User-Agent."
+        "Sign in to the tracker in your desktop browser, then copy two things from it: " +
+            "the full Cookie header and the User-Agent (DevTools → Network → reload the page " +
+            "→ click the first request → Request Headers; F12 in Chrome, Edge, Firefox, " +
+            "Yandex Browser; Safari: Develop → Show Web Inspector). " +
+            "Both must come from the same browser — cf_clearance is bound to the User-Agent. " +
+            "Step-by-step guide for each browser: docs/LOGIN.md in the repository."
     override val unknownError = "unknown error"
 
     override val back = "Back"
@@ -379,8 +384,10 @@ object RuStrings : AppStrings {
     override val languageRussian = "Русский"
     override val manualImportHeader = "Ручной импорт (для опытных)"
     override val manualImportBody =
-        "Вставьте сырой заголовок Cookie и User-Agent из настольного браузера, где выполнен вход " +
-            "(devtools → Network → любой запрос forum/). cf_clearance привязан к User-Agent."
+        "Вставьте заголовок Cookie и User-Agent, скопированные из браузера, где выполнен вход " +
+            "(DevTools → Network → первый запрос → заголовки запроса). " +
+            "Оба значения должны быть из одного и того же браузера: cf_clearance привязан " +
+            "к User-Agent. Пошаговая инструкция для каждого браузера — docs/LOGIN.md в репозитории."
     override val cookieHeaderLabel = "Заголовок Cookie"
     override val userAgentLabel = "User-Agent"
     override val importButton = "Импортировать"
@@ -396,9 +403,12 @@ object RuStrings : AppStrings {
     override val signInTitle = "Вход"
     override val saveSession = "Сохранить сессию"
     override val desktopLoginBody =
-        "На настольном компьютере нет встроенного браузера. Откройте трекер в браузере, " +
-            "войдите, затем скопируйте заголовок Cookie запроса (F12 → Network → любой запрос " +
-            "→ заголовки запроса → cookie) и User-Agent вашего браузера."
+        "Войдите на трекер в браузере компьютера, затем скопируйте оттуда две вещи: " +
+            "весь заголовок Cookie и User-Agent (DevTools → Network → обновите страницу " +
+            "→ кликните первый запрос → заголовки запроса; F12 в Chrome, Edge, Firefox " +
+            "и Яндекс Браузере; Safari: «Разработка» → «Показать веб-инспектор»). " +
+            "Оба значения — из одного и того же браузера: cf_clearance привязан к User-Agent. " +
+            "Пошаговая инструкция для каждого браузера — docs/LOGIN.md в репозитории."
     override val unknownError = "неизвестная ошибка"
 
     override val back = "Назад"

@@ -49,8 +49,10 @@ your credentials there, the browser engine solves Cloudflare and any captcha;
 as soon as the session cookies appear they are saved (encrypted with an
 AndroidKeyStore key) and the app is logged in. The session survives app
 restarts; if it ever expires, log in again, or paste a cookie header +
-User-Agent from desktop devtools under Settings → Manual import (advanced)
-and press **Validate** to check it.
+User-Agent from a signed-in desktop browser under Settings → Manual import
+(advanced) and press **Validate** to check it — both values must come from
+the same browser (see [docs/LOGIN.md](docs/LOGIN.md) for a step-by-step
+guide for Chrome, Firefox, Safari and Yandex Browser).
 
 **Settings:** mirror URL, Wi-Fi-only downloads (auto-pauses on metered
 networks), and 1–5 concurrent downloads.
@@ -67,9 +69,9 @@ with username/password directly. It uses an **imported browser session**
 instead (verified working end-to-end):
 
 1. Log into rutracker.org in your browser.
-2. Open devtools → Network → click any `forum/` request → copy the full
-   **Cookie** request header (a long string starting with `bb_guid=…;
-   bb_ssl=…; bb_session=…; cf_clearance=…`).
+2. Open DevTools → Network → reload the page → click the first request →
+   copy the full **Cookie** request header (a long string starting with
+   `bb_guid=…; bb_ssl=…; bb_session=…; cf_clearance=…`).
 3. Save it (plus that browser's User-Agent) to the session file:
 
        mkdir -p ~/.config/surgemusic
@@ -77,14 +79,23 @@ instead (verified working end-to-end):
          > ~/.config/surgemusic/cookies
        chmod 600 ~/.config/surgemusic/cookies
 
-   (line 1: raw Cookie header, line 2: your browser's User-Agent — `cf_clearance`
-   is bound to it). Env equivalents: `RUTRACKER_COOKIES` + `RUTRACKER_UA`.
+   (line 1: raw Cookie header, line 2: your browser's User-Agent). Env
+   equivalents: `RUTRACKER_COOKIES` + `RUTRACKER_UA`.
+
+**The Cookie and the User-Agent must come from the same browser** —
+Cloudflare binds `cf_clearance` to the exact User-Agent it was issued for, so
+a cookie from Chrome with a User-Agent from Firefox is rejected. Exact
+click-by-click steps for each browser (Chrome/Edge/Yandex, Firefox, Safari —
+including how to enable Safari's developer menu) are in
+[docs/LOGIN.md](docs/LOGIN.md); the desktop app's Sign In dialog points there
+too.
 
 When the session expires you'll get an AUTH error — just re-import fresh
 cookies. Password login (`RUTRACKER_USER`/`RUTRACKER_PASS` or
 `~/.config/surgemusic/credentials`) still works for mirrors that don't run the
-Cloudflare check. The desktop app (Phase 2) will do the login in an embedded
-browser window so none of this is manual.
+Cloudflare check. The desktop app's **Sign In** dialog takes the same two
+values (Cookie header + User-Agent) and validates them on save — the detailed
+walkthrough lives in [docs/LOGIN.md](docs/LOGIN.md).
 
 ## CLI usage
 
