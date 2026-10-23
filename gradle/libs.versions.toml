@@ -19,6 +19,7 @@ ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "kto
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 jlibtorrent = { module = "com.frostwire:jlibtorrent", version.ref = "jlibtorrent" }
 jlibtorrent-macosx-arm64 = { module = "com.frostwire:jlibtorrent-macosx-arm64", version.ref = "jlibtorrent" }
+jlibtorrent-linux-x8664 = { module = "com.frostwire:jlibtorrent-linux-x86_64", version.ref = "jlibtorrent" }
 jlibtorrent-android-arm64 = { module = "com.frostwire:jlibtorrent-android-arm64", version.ref = "jlibtorrent" }
 jlibtorrent-android-x8664 = { module = "com.frostwire:jlibtorrent-android-x86_64", version.ref = "jlibtorrent" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }

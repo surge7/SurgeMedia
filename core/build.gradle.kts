@@ -46,6 +46,9 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.mockwebserver)
+            // Linux native for the loopback engine tests on CI runners (macOS native
+            // comes via jvmMain; test-only so it never ships in the app artifacts).
+            implementation(libs.jlibtorrent.linux.x8664)
         }
     }
     jvmToolchain(21)
