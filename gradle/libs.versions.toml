@@ -24,6 +24,7 @@ jlibtorrent-android-arm64 = { module = "com.frostwire:jlibtorrent-android-arm64"
 jlibtorrent-android-x8664 = { module = "com.frostwire:jlibtorrent-android-x86_64", version.ref = "jlibtorrent" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 mockwebserver = { module = "com.squareup.okhttp3:mockwebserver", version.ref = "okhttp" }
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 
 [plugins]

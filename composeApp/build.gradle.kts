@@ -30,6 +30,10 @@ kotlin {
         val desktopMain by creating { dependsOn(commonMain.get()) }
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
+            // Browser sign-in (CDP cookie capture) talks to a locally-launched Chromium
+            // over OkHttp's WebSocket; core exposes ktor/okhttp only as implementation.
+            implementation(libs.okhttp)
+            implementation(libs.kotlinx.serialization.json)
         }
         jvmMain {
             dependsOn(desktopMain)

@@ -9,11 +9,43 @@ browser:
 - **Android** — just tap **Sign in**. The app opens the tracker in an embedded
   browser; you type your credentials, it solves Cloudflare, and the session is
   saved automatically. Nothing on this page is needed.
-- **Desktop** — there is no embedded browser, so you sign in in your normal
-  browser and copy two values into the app. This page explains how, **for each
+- **Desktop, Chromium browser (Chrome, Edge, Yandex Browser, Brave)** — click
+  **Sign in via browser** in the app. A normal browser window opens on the
+  tracker's login page; sign in there, and the session returns to the app
+  automatically (see "Automatic sign-in" below).
+- **Desktop, Safari or Firefox** — use manual import: sign in in your browser
+  and copy two values into the app. This page explains how, **for each
   browser**.
 
-### The three rules (read first)
+### Automatic sign-in (desktop, one click)
+
+1. In the app click **Sign in via browser**.
+2. A browser window opens directly on the tracker's login page. Sign in as
+   usual — including any Cloudflare check.
+3. That's it. The moment the login cookie appears, the app picks up the
+   session (paired with that browser's own User-Agent), the window closes
+   itself, and the app validates the session.
+
+Details worth knowing:
+
+- The app launches the browser with a **throwaway temporary profile** — your
+  normal profile, bookmarks and cookies are never touched, and everything the
+  login leaves behind is deleted afterwards.
+- The session is read through the browser's standard developer interface
+  (a local debug port opened for this window only) — nothing is sent
+  anywhere; the conversation stays on `127.0.0.1`.
+- The Cookie and User-Agent always come from the **same browser window**, so
+  the Cloudflare `cf_clearance` binding is satisfied by construction — the
+  classic "works in browser, rejected in app" mismatch cannot happen.
+- If the button says no Chromium browser was found, install Chrome/Edge/Yandex
+  or use manual import below.
+
+### Manual import (desktop, Safari/Firefox or no Chromium browser)
+
+Used when the automatic flow above isn't available. You copy the Cookie
+header and User-Agent by hand; the same-browser rule then matters.
+
+#### The three rules (read first)
 
 1. **Sign in first.** Log into the tracker in your browser *before* copying
    anything, otherwise the cookie has no session in it.
@@ -109,11 +141,43 @@ file readable only by your user.
   встроенном браузере: вы вводите логин и пароль, проверка Cloudflare
   проходится автоматически, сессия сохраняется сама. Ничто на этой странице
   вам не нужно.
-- **Компьютер** — встроенного браузера нет, поэтому вы входите на трекер в
-  обычном браузере и копируете в приложение два значения. Ниже — как именно,
+- **Компьютер, браузер на Chromium (Chrome, Edge, Яндекс Браузер, Brave)** —
+  нажмите в приложении **«Войти через браузер»**. Откроется обычное окно
+  браузера на странице входа трекера; войдите в нём — и сессия вернётся в
+  приложение автоматически (см. «Автоматический вход» ниже).
+- **Компьютер, Safari или Firefox** — используйте ручной импорт: войдите на
+  трекер в браузере и скопируйте в приложение два значения. Ниже — как именно,
   **для каждого браузера**.
 
-### Три главных правила (прочтите сначала)
+### Автоматический вход (компьютер, одна кнопка)
+
+1. В приложении нажмите **«Войти через браузер»**.
+2. Откроется окно браузера прямо на странице входа трекера. Войдите как
+   обычно — включая проверку Cloudflare, если она появится.
+3. Всё. Как только появляется cookie входа, приложение забирает сессию (в паре
+   с User-Agent того же браузера), окно закрывается само, а приложение
+   проверяет сессию.
+
+Что полезно знать:
+
+- Приложение запускает браузер с **одноразовым временным профилем** — ваш
+  обычный профиль, закладки и cookie не затрагиваются, а всё, что осталось
+  после входа, удаляется.
+- Сессия читается через штатный интерфейс разработчика браузера (локальный
+  debug-порт, открытый только для этого окна) — никуда ничего не отправляется,
+  весь обмен идёт по `127.0.0.1`.
+- Cookie и User-Agent всегда берутся из **одного и того же окна браузера**, поэтому
+  привязка `cf_clearance` Cloudflare к User-Agent соблюдается автоматически —
+  классическое «в браузере работает, в приложении нет» здесь невозможно.
+- Если кнопка сообщает, что браузер на Chromium не найден — установите
+  Chrome/Edge/Яндекс Браузер или используйте ручной импорт ниже.
+
+### Ручной импорт (компьютер, Safari/Firefox или нет браузера на Chromium)
+
+Применяется, когда автоматический вход недоступен: вы копируете заголовок
+Cookie и User-Agent вручную — и здесь важно правило «одного браузера».
+
+#### Три главных правила (прочтите сначала)
 
 1. **Сначала войдите.** Авторизуйтесь на трекере в браузере *до* копирования,
    иначе в cookie не будет сессии.

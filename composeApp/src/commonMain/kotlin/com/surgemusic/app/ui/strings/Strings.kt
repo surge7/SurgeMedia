@@ -136,6 +136,12 @@ interface AppStrings {
     val signInTitle: String
     val saveSession: String
     val desktopLoginBody: String
+    val signInViaBrowser: String
+    val signInBrowserWaiting: String
+    val signInBrowserValidating: String
+    val signInBrowserClosed: String
+    val signInBrowserNotFound: String
+    fun signInBrowserLaunchFailed(detail: String): String
     val unknownError: String
 
     // Accessibility (icon content descriptions)
@@ -265,12 +271,20 @@ object EnStrings : AppStrings {
     override val signInTitle = "Sign in"
     override val saveSession = "Save session"
     override val desktopLoginBody =
-        "Sign in to the tracker in your desktop browser, then copy two things from it: " +
-            "the full Cookie header and the User-Agent (DevTools → Network → reload the page " +
-            "→ click the first request → Request Headers; F12 in Chrome, Edge, Firefox, " +
-            "Yandex Browser; Safari: Develop → Show Web Inspector). " +
-            "Both must come from the same browser — cf_clearance is bound to the User-Agent. " +
-            "Step-by-step guide for each browser: docs/LOGIN.md in the repository."
+        "Click the button and a Chrome, Edge or Yandex Browser window opens on the " +
+            "tracker's login page — sign in there and the session returns to the app " +
+            "automatically. With Safari or Firefox, use manual import below (docs/LOGIN.md)."
+    override val signInViaBrowser = "Sign in via browser"
+    override val signInBrowserWaiting =
+        "Browser window open — sign in there. This dialog closes itself when done."
+    override val signInBrowserValidating = "Session captured — validating…"
+    override val signInBrowserClosed =
+        "The browser window was closed before login finished."
+    override val signInBrowserNotFound =
+        "No Chromium-based browser found (Chrome, Edge, Yandex Browser). " +
+            "Use manual import below."
+    override fun signInBrowserLaunchFailed(detail: String) =
+        "Couldn't launch the browser: $detail"
     override val unknownError = "unknown error"
 
     override val back = "Back"
@@ -403,12 +417,20 @@ object RuStrings : AppStrings {
     override val signInTitle = "Вход"
     override val saveSession = "Сохранить сессию"
     override val desktopLoginBody =
-        "Войдите на трекер в браузере компьютера, затем скопируйте оттуда две вещи: " +
-            "весь заголовок Cookie и User-Agent (DevTools → Network → обновите страницу " +
-            "→ кликните первый запрос → заголовки запроса; F12 в Chrome, Edge, Firefox " +
-            "и Яндекс Браузере; Safari: «Разработка» → «Показать веб-инспектор»). " +
-            "Оба значения — из одного и того же браузера: cf_clearance привязан к User-Agent. " +
-            "Пошаговая инструкция для каждого браузера — docs/LOGIN.md в репозитории."
+        "Нажмите кнопку — откроется окно Chrome, Edge или Яндекс Браузера со страницей " +
+            "входа трекера. Войдите в нём, и сессия вернётся в приложение автоматически. " +
+            "Если пользуетесь Safari или Firefox — ручной импорт ниже (docs/LOGIN.md)."
+    override val signInViaBrowser = "Войти через браузер"
+    override val signInBrowserWaiting =
+        "Окно браузера открыто — войдите в нём. Этот диалог закроется сам."
+    override val signInBrowserValidating = "Сессия получена — проверяем…"
+    override val signInBrowserClosed =
+        "Окно браузера закрылось до завершения входа."
+    override val signInBrowserNotFound =
+        "Не найден браузер на Chromium (Chrome, Edge, Яндекс Браузер). " +
+            "Используйте ручной импорт ниже."
+    override fun signInBrowserLaunchFailed(detail: String) =
+        "Не удалось запустить браузер: $detail"
     override val unknownError = "неизвестная ошибка"
 
     override val back = "Назад"

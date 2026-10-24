@@ -43,16 +43,19 @@ Privacy policy (EN/RU): [`docs/PRIVACY.md`](docs/PRIVACY.md). License: MIT.
 notifications follow the OS locale.
 
 **Login:** the app cannot log in with a password (rutracker.org is behind a
-Cloudflare browser check), so it logs in in-app: Search or Settings → **Log
-in** opens a real in-app browser on `rutracker.org/forum/login.php` — type
-your credentials there, the browser engine solves Cloudflare and any captcha;
-as soon as the session cookies appear they are saved (encrypted with an
-AndroidKeyStore key) and the app is logged in. The session survives app
-restarts; if it ever expires, log in again, or paste a cookie header +
-User-Agent from a signed-in desktop browser under Settings → Manual import
-(advanced) and press **Validate** to check it — both values must come from
-the same browser (see [docs/LOGIN.md](docs/LOGIN.md) for a step-by-step
-guide for Chrome, Firefox, Safari and Yandex Browser).
+Cloudflare browser check), so it logs in through your browser instead.
+Android: Search or Settings → **Log in** opens a real in-app browser on
+`rutracker.org/forum/login.php` — type your credentials there, the browser
+engine solves Cloudflare and any captcha; as soon as the session cookies
+appear they are saved (encrypted with an AndroidKeyStore key). Desktop: the
+same screen's **Sign in via browser** launches your Chrome/Edge/Yandex window
+on the login page in a throwaway profile and captures the session
+automatically the moment you log in (nothing installed, your normal profile
+untouched, temp profile deleted afterwards). The session survives app
+restarts; if it ever expires, repeat the click — or paste a Cookie header +
+User-Agent from a signed-in browser under Settings → Manual import (advanced)
+and press **Validate** (Safari/Firefox users; both values must come from the
+same browser). Step-by-step per browser: [docs/LOGIN.md](docs/LOGIN.md).
 
 **Settings:** mirror URL, Wi-Fi-only downloads (auto-pauses on metered
 networks), and 1–5 concurrent downloads.
@@ -91,11 +94,13 @@ including how to enable Safari's developer menu) are in
 too.
 
 When the session expires you'll get an AUTH error — just re-import fresh
-cookies. Password login (`RUTRACKER_USER`/`RUTRACKER_PASS` or
+cookies (on desktop, one click of **Sign in via browser** does it). Password
+login (`RUTRACKER_USER`/`RUTRACKER_PASS` or
 `~/.config/surgemusic/credentials`) still works for mirrors that don't run the
-Cloudflare check. The desktop app's **Sign In** dialog takes the same two
-values (Cookie header + User-Agent) and validates them on save — the detailed
-walkthrough lives in [docs/LOGIN.md](docs/LOGIN.md).
+Cloudflare check. The desktop **Sign In** dialog prefers the automatic browser
+flow (Chrome/Edge/Yandex — temp profile, auto-capture, auto-close) and keeps
+the manual Cookie + User-Agent fields as the fallback; the detailed
+walkthrough for both lives in [docs/LOGIN.md](docs/LOGIN.md).
 
 ## CLI usage
 
