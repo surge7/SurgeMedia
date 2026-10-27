@@ -2,6 +2,7 @@
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />
-    <!-- Android 13+ themed icons; the foreground vector is monochrome-safe enough for 0.x. -->
-    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+    <!-- Android 13+ themed icons need a dedicated single-colour silhouette;
+         the full-colour foreground is unreadable once the system tints it. -->
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
 </adaptive-icon>

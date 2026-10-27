@@ -1,6 +1,5 @@
 package com.surgemusic.app.downloads
 
-import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -56,74 +55,6 @@ class MediaFilesTest {
     }
 
     @Test
-    fun relativePathIncludesAlbumAndSubdirectoryWithTrailingSlash() {
-        val path = MediaFiles.relativePathFor(
-            kind = MediaFiles.KIND_AUDIO,
-            albumDir = "Artist - Album (2020)",
-            fileDir = File("/staging/6918211/TorrentName/CD1"),
-            torrentDir = File("/staging/6918211/TorrentName"),
-        )
-        assertEquals("Music/SurgeMedia/Artist - Album (2020)/CD1/", path)
-    }
-
-    @Test
-    fun relativePathHandlesDeeplyNestedDirectories() {
-        val path = MediaFiles.relativePathFor(
-            kind = MediaFiles.KIND_AUDIO,
-            albumDir = "Album",
-            fileDir = File("/staging/1/T/a/b"),
-            torrentDir = File("/staging/1/T"),
-        )
-        assertEquals("Music/SurgeMedia/Album/a/b/", path)
-    }
-
-    @Test
-    fun relativePathForFileAtTorrentRootHasNoSubdirectorySegment() {
-        val path = MediaFiles.relativePathFor(
-            kind = MediaFiles.KIND_AUDIO,
-            albumDir = "Album",
-            fileDir = File("/staging/1/T"),
-            torrentDir = File("/staging/1/T"),
-        )
-        assertEquals("Music/SurgeMedia/Album/", path)
-    }
-
-    @Test
-    fun relativePathWithNullFileDirStillEndsWithSlash() {
-        val path = MediaFiles.relativePathFor(
-            kind = MediaFiles.KIND_AUDIO,
-            albumDir = "Album",
-            fileDir = null,
-            torrentDir = File("/staging/1/T"),
-        )
-        assertEquals("Music/SurgeMedia/Album/", path)
-    }
-
-    @Test
-    fun imagesGoToPicturesRootNotMusic() {
-        // Android rejects Music/… relative paths on the Images collection (verified on
-        // emulator): cover art must land under Pictures/.
-        val path = MediaFiles.relativePathFor(
-            kind = MediaFiles.KIND_IMAGE,
-            albumDir = "Album",
-            fileDir = File("/staging/1/T"),
-            torrentDir = File("/staging/1/T"),
-        )
-        assertEquals("Pictures/SurgeMedia/Album/", path)
-    }
-
-    @Test
-    fun emptyAlbumDirCollapsesToLibraryRoot() {
-        val path = MediaFiles.relativePathFor(
-            kind = MediaFiles.KIND_AUDIO,
-            albumDir = "",
-            fileDir = null,
-            torrentDir = File("/staging/1/T"),
-        )
-        assertEquals("Music/SurgeMedia/", path)
-    }
-
-    @Test
     fun videoExtensionsClassifyAsVideoWithContainerMime() {
         val expected = mapOf(
             "mkv" to "video/x-matroska", "mp4" to "video/mp4", "m4v" to "video/mp4",
@@ -141,14 +72,59 @@ class MediaFilesTest {
         }
     }
 
+    // --- SAF tree → MediaStore mapping (Settings ▸ Storage) ------------------------------
+
     @Test
-    fun videosGoToMoviesRoot() {
-        val dir = MediaFiles.relativePathFor(
-            MediaFiles.KIND_VIDEO,
-            "Pink Floyd - Pompeii",
-            null,
-            File("/torrent"),
+    fun treeDocumentIdIsDecodedFromTreeUri() {
+        // DocumentsUI tree form; ':' and '/' arrive percent-encoded in the path.
+        assertEquals(
+            "primary:Music/MyMusic",
+            MediaFiles.treeDocumentIdOf("content://com.android.externalstorage.documents/tree/primary%3AMusic%2FMyMusic"),
         )
-        assertEquals("Movies/SurgeMedia/Pink Floyd - Pompeii/", dir)
+        // A /document suffix (some pickers return tree+document URIs) must not leak in.
+        assertEquals(
+            "primary:Movies",
+            MediaFiles.treeDocumentIdOf("content://com.android.externalstorage.documents/tree/primary%3AMovies/document/primary%3AMovies"),
+        )
+    }
+
+    @Test
+    fun nonTreeUrisHaveNoDocumentId() {
+        assertNull(MediaFiles.treeDocumentIdOf(""))
+        assertNull(MediaFiles.treeDocumentIdOf("/absolute/path"))
+        assertNull(MediaFiles.treeDocumentIdOf("content://other.authority/nothing"))
+    }
+
+    @Test
+    fun audioTreeUnderMusicMapsToMediaStorePrefix() {
+        assertEquals(
+            "Music/MyMusic/",
+            MediaFiles.mediaStorePrefixFor("audio", "primary:Music/MyMusic"),
+        )
+    }
+
+    @Test
+    fun videoTreeUnderMoviesOrDownloadMaps() {
+        assertEquals("Movies/Films/", MediaFiles.mediaStorePrefixFor("video", "primary:Movies/Films"))
+        assertEquals("Download/vids/", MediaFiles.mediaStorePrefixFor("video", "primary:Download/vids"))
+    }
+
+    @Test
+    fun audioTreeUnderMoviesHasNoMediaStorePrefix() {
+        // Wrong collection for the kind → SAF-only.
+        assertNull(MediaFiles.mediaStorePrefixFor("audio", "primary:Movies/ost"))
+    }
+
+    @Test
+    fun bareStandardRootIsNotMapped() {
+        // "Music" itself must not map: per-album deletes would scope to the whole collection.
+        assertNull(MediaFiles.mediaStorePrefixFor("audio", "primary:Music"))
+        assertNull(MediaFiles.mediaStorePrefixFor("video", "primary:Movies"))
+    }
+
+    @Test
+    fun removableVolumeAndArbitraryFoldersAreNotMapped() {
+        assertNull(MediaFiles.mediaStorePrefixFor("audio", "12AB-3C21:Music/tunes"))
+        assertNull(MediaFiles.mediaStorePrefixFor("audio", "primary:MyStuff/tunes"))
     }
 }

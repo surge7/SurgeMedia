@@ -2,6 +2,7 @@ package com.surgemusic.core.downloads
 
 import com.surgemusic.core.engine.EngineEvent
 import com.surgemusic.core.engine.TorrentEngine
+import com.surgemusic.core.engine.TorrentFileInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -52,7 +53,13 @@ class DownloadManager(
     private val _items = MutableStateFlow<List<DownloadItem>>(emptyList())
     val items: StateFlow<List<DownloadItem>> = _items.asStateFlow()
 
-    private data class StagedStart(val torrentBytes: ByteArray, val stagingDir: String)
+    private data class StagedStart(
+        val torrentBytes: ByteArray,
+        val stagingDir: String,
+        val wantedFiles: Set<Int> = emptySet(),
+        /** Parsed at enqueue ([TorrentEngine.parseFiles]) so chooser flows need no re-parse. */
+        val files: List<TorrentFileInfo> = emptyList(),
+    )
 
     /** engine.start arguments per id — kept out of the public [DownloadItem]. */
     private val staged = MutableStateFlow<Map<String, StagedStart>>(emptyMap())
@@ -75,11 +82,25 @@ class DownloadManager(
      * tapping Download again) is ignored; re-enqueueing a terminal item (DONE/FAILED/
      * CANCELLED) resets it to a fresh QUEUED item for a re-download. Two items with the
      * same id can never coexist — the UI lists items keyed by id and crashes on dupes.
+     *
+     * [wantedFileIndices] selects which torrent files to download (empty = all); the
+     * engine applies skip priorities to the rest, so only selected files ever land in
+     * staging.
      */
-    fun enqueue(request: DownloadRequest, torrentBytes: ByteArray, stagingDir: String) {
+    fun enqueue(
+        request: DownloadRequest,
+        torrentBytes: ByteArray,
+        stagingDir: String,
+        wantedFileIndices: Set<Int> = emptySet(),
+    ) {
         val existing = _items.value.firstOrNull { it.request.id == request.id }
         if (existing != null && existing.state !in terminalStates) return
-        staged.update { it + (request.id to StagedStart(torrentBytes, stagingDir)) }
+        // Metadata-only parse (a few ms even for a discography); kept synchronous so the
+        // staged files are always ready for the chooser by the time the item is visible.
+        val files = runCatching { engine.parseFiles(torrentBytes) }.getOrDefault(emptyList())
+        staged.update {
+            it + (request.id to StagedStart(torrentBytes, stagingDir, wantedFileIndices, files))
+        }
         _items.update { list ->
             if (existing != null) {
                 list.map { if (it.request.id == request.id) DownloadItem(request) else it }
@@ -88,6 +109,88 @@ class DownloadManager(
             }
         }
         pump()
+    }
+
+    /** Parsed file list of [id]'s staged torrent — the file choosers' data source. Empty
+     *  when the torrent could not be parsed (no chooser) or the entry was dropped. */
+    fun torrentFiles(id: String): List<TorrentFileInfo> = staged.value[id]?.files ?: emptyList()
+
+    /** The wanted file set staged for [id] (empty set = every file, engine semantics). */
+    fun wantedFiles(id: String): Set<Int> = staged.value[id]?.wantedFiles ?: emptySet()
+
+    /**
+     * Extends [id]'s selection with [newFileIndices] (the "add more folders" action; the
+     * chooser locks out files already covered by the selection upstream).
+     *
+     * - DOWNLOADING/PAUSED: the engine re-points file priorities at the union — fetched
+     *   pieces survive, so only the new files transfer. `staged` records the union so a
+     *   later add sees the full selected set.
+     * - DONE: the previous round's staging was deleted by finalize, and the finished
+     *   engine torrent's piece state points at that deleted tree. The item restarts
+     *   fresh (QUEUED) wanting only [newFileIndices] — the engine drops the old torrent
+     *   and adds a new one — so albums already in the library are untouched and the new
+     *   round finalizes into the same album folder.
+     *
+     * Returns false when there is nothing to do: unknown id, empty selection, every file
+     * already wanted, or a state the action cannot extend (QUEUED/FINALIZING/FAILED/
+     * CANCELLED). Note the DOWNLOADING branch races a completion happening between the
+     * state read and the engine call — if the torrent completes first, its finalize moved
+     * the old files and the new ones stay unstaged; repeating "add files" (the DONE path)
+     * recovers them.
+     */
+    fun addFiles(id: String, newFileIndices: Set<Int>): Boolean {
+        if (newFileIndices.isEmpty()) return false
+        val start = staged.value[id] ?: return false
+        // Engine semantics: an empty wanted set selects every file, and an unparsable
+        // torrent (files empty) downloaded everything too — in both cases nothing is left
+        // to add.
+        if (start.files.isEmpty()) return false
+        val wanted = start.wantedFiles.ifEmpty { start.files.mapTo(mutableSetOf()) { it.index } }
+        if (wanted.containsAll(start.files.map { it.index })) return false
+        var liveUnion: Set<Int>? = null
+        var restarted = false
+        _items.update { list ->
+            list.map { item ->
+                if (item.request.id != id || liveUnion != null || restarted) return@map item
+                when (item.state) {
+                    DownloadState.DOWNLOADING, DownloadState.PAUSED -> {
+                        val union = start.wantedFiles + newFileIndices
+                        liveUnion = union
+                        val unionBytes = start.files
+                            .filter { it.index in union }
+                            .sumOf { it.sizeBytes }
+                        item.copy(bytesTotal = if (unionBytes > 0) unionBytes else item.bytesTotal)
+                    }
+
+                    DownloadState.DONE -> {
+                        restarted = true
+                        val newBytes = start.files
+                            .filter { it.index in newFileIndices }
+                            .sumOf { it.sizeBytes }
+                            .takeIf { it > 0 }
+                        DownloadItem(item.request.copy(sizeBytes = newBytes ?: item.request.sizeBytes))
+                    }
+
+                    else -> item
+                }
+            }
+        }
+        return when {
+            liveUnion != null -> {
+                val union = liveUnion!!
+                staged.update { it + (id to start.copy(wantedFiles = union)) }
+                engine.setWantedFiles(id, union)
+                true
+            }
+
+            restarted -> {
+                staged.update { it + (id to start.copy(wantedFiles = newFileIndices)) }
+                pump()
+                true
+            }
+
+            else -> false
+        }
     }
 
     fun pause(id: String) {
@@ -200,7 +303,7 @@ class DownloadManager(
                 // blocking), and a synchronous throw (fake/real engine rejecting the args)
                 // becomes a FAILED item instead of escaping into the enqueue caller.
                 try {
-                    engine.start(next.request.id, start.torrentBytes, start.stagingDir)
+                    engine.start(next.request.id, start.torrentBytes, start.stagingDir, start.wantedFiles)
                 } catch (t: Throwable) {
                     onEngineEvent(EngineEvent.Failed(next.request.id, t.message ?: "engine start failed"))
                 }

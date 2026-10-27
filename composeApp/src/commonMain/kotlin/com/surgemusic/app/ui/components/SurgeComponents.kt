@@ -17,7 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CutCornerShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -57,18 +57,18 @@ import com.surgemusic.app.ui.strings.LocalStrings
  * the components render identically in the dark and light Surge Media schemes.
  */
 
-/** Default chamfer for glow/panel primitives — mirrors `MaterialTheme.shapes.medium`. */
-private val MediumCut = CutCornerShape(topStart = 10.dp, bottomEnd = 10.dp)
+/** Default corner radius for glow/panel primitives — mirrors `MaterialTheme.shapes.medium`. */
+private val MediumRound = RoundedCornerShape(10.dp)
 
-/** Neon outline glow: four concentric [Stroke] passes fading outward from [shape]'s edge. */
+/** Soft outline glow: three concentric [Stroke] passes fading outward from [shape]'s edge. */
 fun Modifier.surgeGlow(
     color: Color,
-    shape: Shape = MediumCut,
+    shape: Shape = MediumRound,
     alpha: Float = 1f,
 ): Modifier = drawBehind {
     val outline = shape.createOutline(size, layoutDirection, this)
-    val widths = listOf(10.dp, 6.dp, 3.dp, 1.5.dp)
-    val layerAlphas = listOf(0.05f, 0.12f, 0.28f, 1f)
+    val widths = listOf(8.dp, 4.dp, 1.5.dp)
+    val layerAlphas = listOf(0.04f, 0.12f, 0.85f)
     widths.zip(layerAlphas).forEach { (width, layerAlpha) ->
         drawOutline(
             outline = outline,
@@ -85,7 +85,7 @@ fun Modifier.surgeGlow(
  * factory that depends on theme state).
  */
 @Composable
-fun Modifier.surgePanel(shape: Shape = MediumCut): Modifier {
+fun Modifier.surgePanel(shape: Shape = MediumRound): Modifier {
     val fill = MaterialTheme.colorScheme.surface
     val stroke = MaterialTheme.colorScheme.outline
     return drawBehind {
@@ -99,7 +99,7 @@ fun Modifier.surgePanel(shape: Shape = MediumCut): Modifier {
     }
 }
 
-/** Chamfered primary action; [emphasis] fills solid primary, otherwise a dim primary wash. */
+/** Primary action; [emphasis] fills solid primary, otherwise a dim primary wash. */
 @Composable
 fun SurgeButton(
     text: String,
@@ -121,10 +121,10 @@ fun SurgeButton(
             .alpha(if (enabled) 1f else 0.4f)
             .surgeGlow(
                 color = primary,
-                shape = MediumCut,
+                shape = MediumRound,
                 alpha = if (pressed) 0.45f else if (emphasis) 0.6f else 0.25f,
             )
-            .clip(MediumCut)
+            .clip(MediumRound)
             .background(if (emphasis) primary else primary.copy(alpha = 0.12f))
             .clickable(
                 interactionSource = interactionSource,
@@ -132,19 +132,19 @@ fun SurgeButton(
                 enabled = enabled,
                 onClick = onClick,
             )
-            .heightIn(min = 44.dp)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .heightIn(min = 36.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = text.uppercase(),
+            text = text,
             style = MaterialTheme.typography.labelLarge,
             color = if (emphasis) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
         )
     }
 }
 
-/** Uppercase label-style text button tinted [tint]; dims when disabled. */
+/** Label-style text button tinted [tint]; dims when disabled. */
 @Composable
 fun SurgeTextButton(
     text: String,
@@ -155,7 +155,7 @@ fun SurgeTextButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     Text(
-        text = text.uppercase(),
+        text = text,
         style = MaterialTheme.typography.labelLarge,
         color = tint.copy(alpha = if (enabled) 1f else 0.4f),
         modifier = modifier.clickable(
@@ -218,7 +218,7 @@ fun SurgeTextField(
     )
 }
 
-/** Surface panel container with chamfered edges, outline border and [contentPadding]. */
+/** Surface panel container with rounded corners, outline border and [contentPadding]. */
 @Composable
 fun SurgePanel(
     modifier: Modifier = Modifier,
@@ -231,12 +231,12 @@ fun SurgePanel(
     )
 }
 
-/** Uppercase primary section label with wide tracking. */
+/** Primary section label with slight tracking. */
 @Composable
 fun SurgeSectionHeader(title: String, modifier: Modifier = Modifier) {
     Text(
-        text = title.uppercase(),
-        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.2.em),
+        text = title,
+        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.06.em),
         color = MaterialTheme.colorScheme.primary,
         modifier = modifier,
     )
@@ -253,7 +253,7 @@ fun SurgeChip(text: String, color: Color, modifier: Modifier = Modifier) {
             .padding(horizontal = 8.dp, vertical = 3.dp),
     ) {
         Text(
-            text = text.uppercase(),
+            text = text,
             style = MaterialTheme.typography.labelSmall,
             color = color,
         )
@@ -303,7 +303,7 @@ fun <T> SurgeSegmentedControl(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = label(option).uppercase(),
+                    text = label(option),
                     style = MaterialTheme.typography.labelLarge,
                     color = tint,
                 )
@@ -392,7 +392,7 @@ fun SurgeTopBar(
         )
         Spacer(Modifier.width(8.dp))
         Text(
-            text = title.uppercase(),
+            text = title,
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
@@ -475,7 +475,7 @@ fun SurgeConfirmDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = strings.deleteFiles.uppercase(),
+                text = strings.deleteFiles,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface,
             )

@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CutCornerShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,8 +24,8 @@ import androidx.compose.ui.unit.em
 import com.surgemusic.app.ui.strings.AppStrings
 import com.surgemusic.app.ui.strings.LocalStrings
 
-/** Chamfered chip corner — a smaller sibling of the panels' `CutCornerShape(10.dp)`. */
-private val SortChipShape = CutCornerShape(topStart = 6.dp, bottomEnd = 6.dp)
+/** Rounded chip corner — a smaller sibling of the panels' rounded medium shape. */
+private val SortChipShape = RoundedCornerShape(6.dp)
 
 /** Sort display labels; the enum itself stays data-only so labels localize with the UI. */
 private fun sortLabel(sort: SearchSort, strings: AppStrings): String = when (sort) {
@@ -41,7 +41,7 @@ private fun sortLabel(sort: SearchSort, strings: AppStrings): String = when (sor
  *
  * A tiny "SORT" label followed by one selectable chip per [SearchSort], in a horizontally
  * scrollable row so it fits narrow phones; the whole bar stays ≤ 40dp tall. Chips are kin to
- * [com.surgemusic.app.ui.components.SurgeChip] (transparent, 1dp outlined, uppercase
+ * [com.surgemusic.app.ui.components.SurgeChip] (transparent, 1dp outlined
  * `labelSmall`) but selectable: the selected chip gets the primary border/text plus a faint
  * primary wash, unselected ones tone down to `onSurfaceVariant`.
  */
@@ -97,7 +97,7 @@ private fun SortChip(
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = text.uppercase(),
+            text = text,
             style = MaterialTheme.typography.labelSmall,
             color = tint,
         )

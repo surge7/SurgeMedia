@@ -24,6 +24,9 @@ import com.surgemusic.app.ui.login.WebViewLoginScreen
 import com.surgemusic.core.downloads.DownloadRequest
 import java.io.File
 import kotlin.concurrent.thread
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -31,10 +34,45 @@ class MainActivity : ComponentActivity() {
     private val requestPermissions =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { /* best effort */ }
 
+    /**
+     * Pending Settings ▸ Storage pick (SAF): the container's suspend picker parks a
+     * [CompletableDeferred] here, the launcher resolves it (tree URI string, or null on
+     * cancel) and persists read/write access so later finalize/delete passes keep working
+     * across restarts.
+     */
+    private var pendingFolderPick: CompletableDeferred<String?>? = null
+
+    private val pickFolder =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            val deferred = pendingFolderPick
+            pendingFolderPick = null
+            if (deferred == null) return@registerForActivityResult
+            val path = uri?.let { u ->
+                runCatching {
+                    contentResolver.takePersistableUriPermission(
+                        u,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    )
+                    u.toString()
+                }.getOrNull()
+            }
+            deferred.complete(path)
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppContainer.appContext = applicationContext
         AppContainer.startNetworkGate()
+        // Settings ▸ Storage folder picker: the system chooser must launch from this
+        // activity, so the container's suspend picker hops over and parks on a deferred.
+        AppContainer.folderPicker = {
+            withContext(Dispatchers.Main) {
+                CompletableDeferred<String?>().also { deferred ->
+                    pendingFolderPick = deferred
+                    pickFolder.launch(null)
+                }.await()
+            }
+        }
         // Prewarm the torrent engine off the main thread: the first lazy touch starts the
         // native libtorrent session (slow); paying it here removes the first-download jank
         // instead of blocking the UI thread at the first enqueue or service start.
@@ -69,7 +107,8 @@ class MainActivity : ComponentActivity() {
                 settingsViewModel = AppContainer.settingsViewModel,
                 sessionRepository = AppContainer.sessionStore,
                 loginOverlay = { onFinished -> WebViewLoginScreen(onFinished) },
-                onDownload = { row -> AppContainer.download(row) },
+                onPrepareDownload = { row -> AppContainer.prepare(row) },
+                onStartDownload = { row, prepared, wanted -> AppContainer.startDownload(row, prepared, wanted) },
             )
         }
     }

@@ -5,6 +5,8 @@ import android.content.Context
 import android.net.Uri
 import android.provider.BaseColumns
 import android.provider.MediaStore
+import androidx.documentfile.provider.DocumentFile
+import com.surgemusic.app.settings.SettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -66,9 +68,12 @@ internal object LibraryGrouping {
 
 /**
  * Downloaded tab over MediaStore (androidMain twin of desktopMain's `DesktopLibrary`):
- * enumerates and deletes what the app finalized under its public library roots —
- * `Music|Movies|Pictures/SurgeMedia/…` plus the pre-rebrand `SurgeMusic` roots — on
- * [MediaStore.VOLUME_EXTERNAL_PRIMARY].
+ * enumerates and deletes what the app finalized under its library roots — the built-in
+ * `Music|Movies|Pictures/SurgeMedia/…` plus the pre-rebrand `SurgeMusic` roots on
+ * [MediaStore.VOLUME_EXTERNAL_PRIMARY], and, when set (Settings ▸ Storage), the custom
+ * music/video folders: a folder that maps onto a MediaStore standard root is queried
+ * with the same RELATIVE_PATH machinery; any other SAF tree is listed via
+ * [DocumentFile]. Cover art always stays on the default Pictures root.
  *
  * Query strategy mirrors [MediaStoreCleaner]: selections bind only FIXED
  * `RELATIVE_PATH LIKE '<root>/%'` prefixes (never a pattern built from the release
@@ -77,8 +82,16 @@ internal object LibraryGrouping {
  * Per-row deletes are wrapped in `runCatching` (a SecurityException on a row this app
  * does not own only counts that row as failed); a sweep that matches nothing is
  * [Result.success] with 0.
+ *
+ * [deleteAll] deliberately sweeps only the app's own built-in + legacy roots — never a
+ * custom folder, which may hold the user's pre-existing media the app cannot attribute.
+ * Custom-folder content is removed per release ([delete]) or per download item
+ * ([MediaStoreCleaner.deleteFor]), both scoped to one title-derived album directory.
  */
-class MediaStoreLibrary(private val context: Context) : DownloadedLibrary {
+class MediaStoreLibrary(
+    private val context: Context,
+    private val settings: SettingsStore,
+) : DownloadedLibrary {
 
     /** One library root: a MediaStore collection plus its fixed relative-path prefix. */
     private data class Root(
@@ -89,20 +102,70 @@ class MediaStoreLibrary(private val context: Context) : DownloadedLibrary {
         val locationLabel: String,
     )
 
+    /** One SAF tree root (custom folder with no MediaStore equivalent). */
+    private data class TreeRoot(
+        val id: String,
+        val treeUri: Uri,
+        val kindLabel: String,
+        val locationLabel: String,
+    )
+
     private val volume = MediaStore.VOLUME_EXTERNAL_PRIMARY
 
-    private val roots: List<Root> = listOf(
-        Root("music", MediaStore.Audio.Media.getContentUri(volume), "Music/SurgeMedia/", "Music", "Music"),
-        Root("movies", MediaStore.Video.Media.getContentUri(volume), "Movies/SurgeMedia/", "Movies", "Movies"),
+    private fun audioCollection() = MediaStore.Audio.Media.getContentUri(volume)
+    private fun videoCollection() = MediaStore.Video.Media.getContentUri(volume)
+
+    /** Built-in + legacy roots — also the only roots [deleteAll] ever sweeps. */
+    private val builtinRoots: List<Root> = listOf(
+        Root("music", audioCollection(), "Music/SurgeMedia/", "Music", "Music"),
+        Root("movies", videoCollection(), "Movies/SurgeMedia/", "Movies", "Movies"),
         Root("pictures", MediaStore.Images.Media.getContentUri(volume), "Pictures/SurgeMedia/", "Pictures", "Pictures"),
-        Root("music_legacy", MediaStore.Audio.Media.getContentUri(volume), "Music/SurgeMusic/", "Music", "Music (legacy)"),
-        Root("movies_legacy", MediaStore.Video.Media.getContentUri(volume), "Movies/SurgeMusic/", "Movies", "Movies (legacy)"),
+        Root("music_legacy", audioCollection(), "Music/SurgeMusic/", "Music", "Music (legacy)"),
+        Root("movies_legacy", videoCollection(), "Movies/SurgeMusic/", "Movies", "Movies (legacy)"),
         Root("pictures_legacy", MediaStore.Images.Media.getContentUri(volume), "Pictures/SurgeMusic/", "Pictures", "Pictures (legacy)"),
+    )
+
+    /** Custom-folder MediaStore root for one kind, or null when unset/unmappable. */
+    private fun customRoot(kind: String, folder: String): Root? {
+        if (folder.isBlank()) return null
+        val docId = MediaFiles.treeDocumentIdOf(folder) ?: return null
+        val prefix = MediaFiles.mediaStorePrefixFor(kind, docId) ?: return null
+        val collection = if (kind == MediaFiles.KIND_VIDEO) videoCollection() else audioCollection()
+        return Root(
+            id = if (kind == MediaFiles.KIND_VIDEO) "movies_custom" else "music_custom",
+            collection = collection,
+            prefix = prefix,
+            kindLabel = if (kind == MediaFiles.KIND_VIDEO) "Movies" else "Music",
+            locationLabel = prefix.trimEnd('/'),
+        )
+    }
+
+    /** Custom-folder SAF tree for one kind, or null when unset or mapped onto MediaStore. */
+    private fun customTree(kind: String, folder: String): TreeRoot? {
+        if (folder.isBlank()) return null
+        val docId = MediaFiles.treeDocumentIdOf(folder) ?: return null
+        if (MediaFiles.mediaStorePrefixFor(kind, docId) != null) return null
+        return TreeRoot(
+            id = if (kind == MediaFiles.KIND_VIDEO) "movies_custom" else "music_custom",
+            treeUri = Uri.parse(folder),
+            kindLabel = if (kind == MediaFiles.KIND_VIDEO) "Movies" else "Music",
+            locationLabel = docId,
+        )
+    }
+
+    private fun allRoots(): List<Root> = builtinRoots + listOfNotNull(
+        customRoot(MediaFiles.KIND_AUDIO, settings.musicFolder.value),
+        customRoot(MediaFiles.KIND_VIDEO, settings.videoFolder.value),
+    )
+
+    private fun allTrees(): List<TreeRoot> = listOfNotNull(
+        customTree(MediaFiles.KIND_AUDIO, settings.musicFolder.value),
+        customTree(MediaFiles.KIND_VIDEO, settings.videoFolder.value),
     )
 
     override suspend fun list(): Result<List<DownloadedRelease>> = runCatching {
         withContext(Dispatchers.IO) {
-            roots.flatMap { root ->
+            val storeReleases = allRoots().flatMap { root ->
                 LibraryGrouping.buildReleases(
                     rootId = root.id,
                     kindLabel = root.kindLabel,
@@ -110,24 +173,79 @@ class MediaStoreLibrary(private val context: Context) : DownloadedLibrary {
                     rootPrefix = root.prefix,
                     rows = queryPaths(root).map { it.first to it.second },
                 )
-            }.sortedWith(compareBy({ it.title.lowercase() }, { it.rootId }))
+            }
+            val treeReleases = allTrees().flatMap { tree ->
+                LibraryGrouping.buildReleases(
+                    rootId = tree.id,
+                    kindLabel = tree.kindLabel,
+                    locationLabel = tree.locationLabel,
+                    rootPrefix = "",
+                    rows = treeRows(tree),
+                )
+            }
+            (storeReleases + treeReleases)
+                .sortedWith(compareBy({ it.title.lowercase() }, { it.rootId }))
         }
     }
 
     override suspend fun delete(release: DownloadedRelease): Result<Int> = runCatching {
         withContext(Dispatchers.IO) {
-            val root = roots.firstOrNull { it.id == release.rootId }
-                ?: error("unknown library root ${release.rootId}")
-            deleteMatching(root) { path ->
-                LibraryGrouping.matchesRelease(path, root.prefix, release.title)
+            val root = allRoots().firstOrNull { it.id == release.rootId }
+            if (root != null) {
+                deleteMatching(root) { path ->
+                    LibraryGrouping.matchesRelease(path, root.prefix, release.title)
+                }
+            } else {
+                val tree = allTrees().firstOrNull { it.id == release.rootId }
+                    ?: error("unknown library root ${release.rootId}")
+                deleteFromTree(tree, release.title)
             }
         }
     }
 
     override suspend fun deleteAll(): Result<Int> = runCatching {
         withContext(Dispatchers.IO) {
-            roots.sumOf { root -> deleteMatching(root) { true } }
+            // Built-in + legacy roots only — see class KDoc (custom folders are never swept).
+            builtinRoots.sumOf { root -> deleteMatching(root) { true } }
         }
+    }
+
+    /** ("<album>/sub/file", size) rows under [tree], synthesized from the DocumentFile walk. */
+    private fun treeRows(tree: TreeRoot): List<Pair<String, Long>> {
+        val root = DocumentFile.fromTreeUri(context, tree.treeUri) ?: return emptyList()
+        val rows = mutableListOf<Pair<String, Long>>()
+        fun walk(dir: DocumentFile, prefix: String) {
+            dir.listFiles().forEach { child ->
+                val name = child.name ?: return@forEach
+                when {
+                    child.isDirectory -> walk(child, "$prefix$name/")
+                    child.isFile -> rows += "$prefix$name" to child.length()
+                }
+            }
+        }
+        walk(root, "")
+        return rows
+    }
+
+    /** Deletes one release's subtree (or its loose files for UNTITLED) inside [tree]. */
+    private fun deleteFromTree(tree: TreeRoot, title: String): Int {
+        val root = DocumentFile.fromTreeUri(context, tree.treeUri) ?: return 0
+        if (title == DownloadedRelease.UNTITLED) {
+            return root.listFiles().filter { !it.isDirectory }.count { it.delete() }
+        }
+        val album = root.listFiles().firstOrNull { it.isDirectory && it.name == title } ?: return 0
+        return deleteTreeDoc(album)
+    }
+
+    /** Depth-first delete; counts removed files, prunes directories after their children. */
+    private fun deleteTreeDoc(node: DocumentFile): Int {
+        if (node.isDirectory) {
+            var files = 0
+            node.listFiles().forEach { files += deleteTreeDoc(it) }
+            node.delete()
+            return files
+        }
+        return if (node.isFile && node.delete()) 1 else 0
     }
 
     /** (RELATIVE_PATH, SIZE) of every row under [root]'s fixed prefix; empty when not queryable. */

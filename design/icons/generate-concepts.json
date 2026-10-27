@@ -1,0 +1,40 @@
+{
+  "requests": [
+    {
+      "prompt": "App icon, cyberpunk neon design: a single bold stylized waveform crest that surges upward and simultaneously reads as a lightning bolt arrow, sharp angular peaks, thick glowing electric cyan line (#00E5FF) with a hot magenta (#FF3D81) trailing echo offset behind it, dark near-black navy background (#0B0E17), flat vector geometric style, crisp hard edges, high contrast, minimal detail, centered composition with artwork confined to the central 60 percent of the frame and generous empty margin, readable at 32 pixels, no text, no letters, no watermark, no mockup, front-facing straight on, no perspective, no tilt",
+      "aspect_ratio": "1:1",
+      "resolution": "2K",
+      "output_file": "concept-1-surge-wave.png"
+    },
+    {
+      "prompt": "App icon, cyberpunk neon design: a glowing hexagonal aperture portal with a bright triangular play void cut through the center and horizontal light streaks streaming through it, hexagon outlined in electric cyan (#00E5FF), inner glow hot magenta (#FF3D81), dark near-black navy background (#0B0E17), flat vector geometric style, crisp clean shapes, high contrast, minimal detail, centered composition with artwork confined to the central 60 percent of the frame and generous empty margin, readable at 32 pixels, no text, no letters, no watermark, no mockup, front-facing straight on, no perspective, no tilt",
+      "aspect_ratio": "1:1",
+      "resolution": "2K",
+      "output_file": "concept-2-hex-portal.png"
+    },
+    {
+      "prompt": "App icon, cyberpunk neon design: a stylized capital letter S constructed entirely from a flowing ribbon of luminous data stream, ribbon gradient from electric cyan (#00E5FF) to hot magenta (#FF3D81), a few small square data particles trailing the ribbon, dark near-black navy background (#0B0E17), flat vector geometric style, crisp clean shapes, high contrast, minimal detail, centered composition with artwork confined to the central 60 percent of the frame and generous empty margin, readable at 32 pixels, no other text, no watermark, no mockup, front-facing straight on, no perspective, no tilt",
+      "aspect_ratio": "1:1",
+      "resolution": "2K",
+      "output_file": "concept-3-s-ribbon.png"
+    },
+    {
+      "prompt": "App icon, cyberpunk neon design: a swirl of glowing hexagonal particle nodes connected by thin data lines orbiting in a spiral torrent swarm, nodes bright electric cyan (#00E5FF) fading to hot magenta (#FF3D81) at the outer edge, dark near-black navy background (#0B0E17), flat vector geometric style, crisp clean shapes, high contrast, minimal detail, centered composition with artwork confined to the central 60 percent of the frame and generous empty margin, readable at 32 pixels, no text, no letters, no watermark, no mockup, front-facing straight on, no perspective, no tilt",
+      "aspect_ratio": "1:1",
+      "resolution": "2K",
+      "output_file": "concept-4-torrent-swirl.png"
+    },
+    {
+      "prompt": "App icon, cyberpunk neon design: a diamond shape formed by vertical equalizer bars of varying height bursting outward in a radial surge, bars electric cyan (#00E5FF) with the single tallest bar in bright yellow (#F5D90A), dark near-black navy background (#0B0E17), flat vector geometric style, crisp clean shapes, high contrast, minimal detail, centered composition with artwork confined to the central 60 percent of the frame and generous empty margin, readable at 32 pixels, no text, no letters, no watermark, no mockup, front-facing straight on, no perspective, no tilt",
+      "aspect_ratio": "1:1",
+      "resolution": "2K",
+      "output_file": "concept-5-pulse-diamond.png"
+    },
+    {
+      "prompt": "App icon, cyberpunk neon design: three stacked layered media panels receding backward with chromatic aberration glitch offsets in cyan and magenta, a sharp glowing play triangle on the front face, dark near-black navy background (#0B0E17), flat vector geometric style, crisp clean shapes, high contrast, minimal detail, centered composition with artwork confined to the central 60 percent of the frame and generous empty margin, readable at 32 pixels, no text, no letters, no watermark, no mockup, front-facing straight on, no perspective, no tilt",
+      "aspect_ratio": "1:1",
+      "resolution": "2K",
+      "output_file": "concept-6-glitch-stack.png"
+    }
+  ]
+}

@@ -37,8 +37,9 @@ class LoopbackHarness : AutoCloseable {
         sourceDir.parent.toAbsolutePath().toString(),
     )
 
-    fun startLeech() = leechEngine.start(
+    fun startLeech(wantedFiles: Set<Int> = emptySet()) = leechEngine.start(
         LEECH_ID, torrentBytes, targetDir.toAbsolutePath().toString(),
+        wantedFiles,
         extraPeers = listOf("127.0.0.1" to seedEngine.listenPort()),
     )
 

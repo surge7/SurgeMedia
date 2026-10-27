@@ -33,6 +33,16 @@ class SettingsStore(private val store: KeyValueStore) : AppSettings {
     private val _language = MutableStateFlow(appLanguageOf(store.getString(KEY_LANGUAGE)))
     override val language: StateFlow<AppLanguage> = _language.asStateFlow()
 
+    // SAF tree URIs (Settings ▸ Storage), "" = built-in default destination.
+    private val _musicFolder = MutableStateFlow(store.getString(KEY_MUSIC_FOLDER) ?: "")
+    override val musicFolder: StateFlow<String> = _musicFolder.asStateFlow()
+
+    private val _videoFolder = MutableStateFlow(store.getString(KEY_VIDEO_FOLDER) ?: "")
+    override val videoFolder: StateFlow<String> = _videoFolder.asStateFlow()
+
+    override val musicFolderDefaultLabel: String = "Music/$BRAND_DIR"
+    override val videoFolderDefaultLabel: String = "Movies/$BRAND_DIR"
+
     override fun setWifiOnly(enabled: Boolean) {
         store.putBoolean(KEY_WIFI_ONLY, enabled)
         _wifiOnly.value = enabled
@@ -60,12 +70,25 @@ class SettingsStore(private val store: KeyValueStore) : AppSettings {
         _language.value = language
     }
 
+    override fun setMusicFolder(path: String) {
+        store.putString(KEY_MUSIC_FOLDER, path)
+        _musicFolder.value = path
+    }
+
+    override fun setVideoFolder(path: String) {
+        store.putString(KEY_VIDEO_FOLDER, path)
+        _videoFolder.value = path
+    }
+
     private companion object {
         const val KEY_WIFI_ONLY = "wifi_only"
         const val KEY_MIRROR = "mirror"
         const val KEY_CONCURRENT_DOWNLOADS = "concurrent_downloads"
         const val KEY_THEME_MODE = "theme_mode"
         const val KEY_LANGUAGE = "language"
+        const val KEY_MUSIC_FOLDER = "music_folder"
+        const val KEY_VIDEO_FOLDER = "video_folder"
+        const val BRAND_DIR = "SurgeMedia"
         const val DEFAULT_WIFI_ONLY = true
         const val DEFAULT_MIRROR = "https://rutracker.org"
         const val DEFAULT_CONCURRENT_DOWNLOADS = 3

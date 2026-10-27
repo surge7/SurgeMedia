@@ -1,5 +1,6 @@
 package com.surgemusic.app.downloads
 
+import com.surgemusic.app.settings.DesktopSettingsStore
 import com.surgemusic.core.downloads.DownloadItem
 import java.io.File
 import java.nio.file.AtomicMoveNotSupportedException
@@ -11,26 +12,26 @@ import kotlinx.coroutines.withContext
 
 /**
  * Desktop twin of androidMain's `MediaStoreFinalizer` (plan Task 6): moves a finished
- * torrent's staged media files into the user's library — audio + cover art under
- * `~/Music/SurgeMedia/<sanitized title>/…`, video under `~/Movies/SurgeMedia/…` — with
- * `Files.move`. (Files finalized by pre-rebrand builds live under `~/Music/SurgeMusic`;
- * [DesktopFileCleaner] sweeps both roots.)
+ * torrent's staged media files into the user's library — audio + cover art under the
+ * music folder, video under the video folder (Settings ▸ Storage; built-in defaults
+ * `~/Music/SurgeMedia/<title>/…` and `~/Movies/SurgeMedia/…`) — with `Files.move`.
+ * (Files finalized by pre-rebrand builds live under `~/Music/SurgeMusic`;
+ * [DesktopFileCleaner] sweeps that root too.)
  *
  * Contract mirrors MediaStoreFinalizer: media files only (non-media like .log/.cue/.nfo
  * are skipped by design), per-file isolation so one rejected file cannot fail the batch,
  * the staging tree is deleted afterwards, and an all-skipped batch fails the finalize
- * with the skipped list. Cover art stays under Music/ here — androidMain's
+ * with the skipped list. Cover art stays under the music folder — androidMain's
  * `Pictures/SurgeMedia` split exists only because MediaStore enforces
  * collection-specific roots, which desktop has no equivalent of.
  *
- * Moves use `ATOMIC_MOVE`; on [AtomicMoveNotSupportedException] (staging and home on
+ * Moves use `ATOMIC_MOVE`; on [AtomicMoveNotSupportedException] (staging and target on
  * different volumes) it falls back to copy+delete. The album directory is created lazily,
  * by the first moved file's parent-dir creation, so an all-skipped batch leaves no empty
- * library dir behind (android MediaStore creates nothing until the first insert either).
- * Runs off the main thread; any failure surfaces as `Result.failure` for DownloadManager
- * to render on the item.
+ * library dir behind. Runs off the main thread; any failure surfaces as
+ * `Result.failure` for DownloadManager to render on the item.
  */
-object DesktopFinalizer {
+class DesktopFinalizer(private val settings: DesktopSettingsStore) {
 
     /** Same extension sets as androidMain's `MediaFiles` — kept in sync (it is androidModule-internal). */
     private val audioExt = setOf("flac", "mp3", "ogg", "oga", "wav", "m4a", "aac", "ape", "wv", "opus")
@@ -39,8 +40,18 @@ object DesktopFinalizer {
         "mkv", "mp4", "m4v", "webm", "avi", "mov", "ts", "m2ts", "mpg", "mpeg", "vob", "wmv", "flv", "3gp",
     )
 
-    private const val MUSIC_DIR = "SurgeMedia"
-    private const val MOVIES_DIR = "SurgeMedia"
+    /** Destination root for finished audio (+cover art); the custom folder or the built-in default. */
+    private fun musicRoot(): Path = root(settings.musicFolder.value, "Music")
+
+    /** Destination root for finished video; the custom folder or the built-in default. */
+    private fun videoRoot(): Path = root(settings.videoFolder.value, "Movies")
+
+    private fun root(custom: String, defaultParent: String): Path =
+        if (custom.isBlank()) {
+            Path.of(System.getProperty("user.home"), defaultParent, BRAND_DIR)
+        } else {
+            Path.of(custom)
+        }
 
     suspend fun finalize(item: DownloadItem, staging: String): Result<String> =
         withContext(Dispatchers.IO) {
@@ -50,8 +61,8 @@ object DesktopFinalizer {
                 val albumDir = sanitize(item.request.title).take(120)
                 // No eager createDirectories: the first successful move creates the album
                 // tree via moveIntoLibrary's parent-dir creation (all-skipped → no empty dir).
-                val musicRoot = Path.of(System.getProperty("user.home"), "Music", MUSIC_DIR).resolve(albumDir)
-                val moviesRoot = Path.of(System.getProperty("user.home"), "Movies", MOVIES_DIR).resolve(albumDir)
+                val musicRoot = musicRoot().resolve(albumDir)
+                val moviesRoot = videoRoot().resolve(albumDir)
                 var moved = 0
                 val failedFiles = mutableListOf<String>()
                 val rootsWritten = linkedSetOf<String>()
@@ -63,9 +74,13 @@ object DesktopFinalizer {
                         val kind = classify(f.name) ?: return@forEach
                         // Per-file isolation: one unmovable file must not fail the whole batch.
                         val ok = runCatching {
-                            val root = if (kind == Kind.VIDEO) moviesRoot else musicRoot
-                            moveIntoLibrary(f, torrentDir, root)
-                            rootsWritten += if (kind == Kind.VIDEO) "~/Movies/$MOVIES_DIR" else "~/Music/$MUSIC_DIR"
+                            if (kind == Kind.VIDEO) {
+                                moveIntoLibrary(f, torrentDir, moviesRoot)
+                                rootsWritten += display(videoRoot())
+                            } else {
+                                moveIntoLibrary(f, torrentDir, musicRoot)
+                                rootsWritten += display(musicRoot())
+                            }
                         }.isSuccess
                         if (ok) moved++ else failedFiles.add(f.name)
                     }
@@ -82,6 +97,10 @@ object DesktopFinalizer {
                 }
             }
         }
+
+    /** Shortens the home prefix to `~` so output notes stay readable. */
+    private fun display(path: Path): String =
+        path.toAbsolutePath().toString().replace(System.getProperty("user.home"), "~")
 
     /** Preserves the torrent's internal sub-path under the album dir. */
     private fun moveIntoLibrary(file: File, torrentDir: File, libraryRoot: Path) {
@@ -114,4 +133,8 @@ object DesktopFinalizer {
     }
 
     private fun sanitize(s: String) = s.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
+
+    private companion object {
+        const val BRAND_DIR = "SurgeMedia"
+    }
 }

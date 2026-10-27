@@ -124,7 +124,7 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                 contentPadding = PaddingValues(20.dp),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    // SurgeTopBar look: primary accent bar + uppercase titleMedium.
+                    // SurgeTopBar look: primary accent bar + titleMedium.
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
@@ -134,7 +134,7 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = strings.signInTitle.uppercase(),
+                            text = strings.signInTitle,
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                         )

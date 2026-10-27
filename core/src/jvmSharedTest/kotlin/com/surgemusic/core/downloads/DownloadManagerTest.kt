@@ -1,6 +1,7 @@
 package com.surgemusic.core.downloads
 
 import com.surgemusic.core.engine.EngineEvent
+import com.surgemusic.core.engine.TorrentFileInfo
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -9,6 +10,7 @@ import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -69,6 +71,25 @@ class DownloadManagerTest {
         assertEquals("t-1", call.id)
         assertContentEquals(torrent, call.torrentBytes)
         assertEquals("/staging/t-1", call.targetDir)
+    }
+
+    @Test
+    fun wantedFileSelectionIsForwardedToEngineStart() = runBlocking {
+        val engine = FakeEngine()
+        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1", wantedFileIndices = setOf(0, 2))
+
+        awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+        assertEquals(setOf(0, 2), engine.started.value.single().wantedFiles)
+
+        // Default (no selection) reaches the engine as "everything".
+        manager.clearCompleted()
+        manager.remove("t-1")
+        manager.enqueue(request("t-2"), torrent, "/staging/t-2")
+        awaitItem(manager, "t-2") { it.state == DownloadState.DOWNLOADING }
+        assertEquals(emptySet(), engine.started.value.last().wantedFiles)
     }
 
     @Test
@@ -354,5 +375,100 @@ class DownloadManagerTest {
 
         assertEquals(before, manager.items.value)
         assertTrue(engine.cancelled.value.isEmpty())
+    }
+
+    // ── Add-files flows (extending a torrent's selection with more folders) ──────────
+
+    private val fourFiles = listOf(
+        TorrentFileInfo(0, "Album A/01.flac", 100),
+        TorrentFileInfo(1, "Album A/02.flac", 200),
+        TorrentFileInfo(2, "Album B/01.flac", 400),
+        TorrentFileInfo(3, "cover.jpg", 50),
+    )
+
+    @Test
+    fun stagedFilesAndWantedSetAreExposedAfterEnqueue() = runBlocking {
+        val engine = FakeEngine().apply { files = fourFiles }
+        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1", wantedFileIndices = setOf(0, 2))
+
+        assertEquals(fourFiles, manager.torrentFiles("t-1"))
+        assertEquals(setOf(0, 2), manager.wantedFiles("t-1"))
+        assertTrue(manager.torrentFiles("nope").isEmpty(), "unknown id exposes no files")
+        assertTrue(manager.wantedFiles("nope").isEmpty())
+    }
+
+    @Test
+    fun addFilesOnDownloadingMergesAndRepointsEnginePriorities() = runBlocking {
+        val engine = FakeEngine().apply { files = fourFiles }
+        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+        manager.enqueue(request("t-1", sizeBytes = 500), torrent, "/staging/t-1", wantedFileIndices = setOf(0, 2))
+        awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+
+        val added = manager.addFiles("t-1", setOf(3))
+
+        assertTrue(added)
+        assertEquals(listOf("t-1" to setOf(0, 2, 3)), engine.priorityUpdates.value)
+        assertEquals(setOf(0, 2, 3), manager.wantedFiles("t-1"))
+        // the item's total now covers the union (100 + 400 + 50)
+        assertEquals(550L, item(manager, "t-1").bytesTotal)
+        assertEquals(1, engine.started.value.size, "a live merge must not restart the engine")
+    }
+
+    @Test
+    fun addFilesOnDoneRestartsWantingOnlyNewFiles() = runBlocking {
+        val engine = FakeEngine().apply { files = fourFiles }
+        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+        manager.enqueue(request("t-1", sizeBytes = 100), torrent, "/staging/t-1", wantedFileIndices = setOf(0))
+        awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+        assertTrue(engine.events.tryEmit(EngineEvent.Completed("t-1")))
+        awaitItem(manager, "t-1") { it.state == DownloadState.DONE }
+
+        val added = manager.addFiles("t-1", setOf(1, 2))
+
+        assertTrue(added)
+        val restarted = awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+        assertEquals(600L, restarted.request.sizeBytes, "size reflects the new selection only")
+        assertEquals(2, engine.started.value.size, "DONE extends via engine.start, not a priority update")
+        assertEquals(setOf(1, 2), engine.started.value[1].wantedFiles)
+        assertEquals(setOf(1, 2), manager.wantedFiles("t-1"))
+        assertTrue(engine.priorityUpdates.value.isEmpty())
+    }
+
+    @Test
+    fun addFilesNoopsWhenEverythingIsAlreadyWanted() = runBlocking {
+        val engine = FakeEngine().apply { files = fourFiles }
+        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+        // explicit full selection
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1", wantedFileIndices = setOf(0, 1, 2, 3))
+        awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+        assertFalse(manager.addFiles("t-1", setOf(3)))
+        // implicit full selection (empty wanted set = all files) on a DONE item
+        manager.enqueue(request("t-2"), torrent, "/staging/t-2")
+        awaitItem(manager, "t-2") { it.state == DownloadState.DOWNLOADING }
+        assertTrue(engine.events.tryEmit(EngineEvent.Completed("t-2")))
+        awaitItem(manager, "t-2") { it.state == DownloadState.DONE }
+        assertFalse(manager.addFiles("t-2", setOf(1)))
+        assertTrue(engine.priorityUpdates.value.isEmpty())
+    }
+
+    @Test
+    fun addFilesNoopsOnUnknownIdAndUnextensibleStates() = runBlocking {
+        val engine = FakeEngine()
+        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+        assertFalse(manager.addFiles("nope", setOf(0)))
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1", wantedFileIndices = setOf(0))
+        awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+        assertTrue(engine.events.tryEmit(EngineEvent.Failed("t-1", "boom")))
+        awaitItem(manager, "t-1") { it.state == DownloadState.FAILED }
+        assertFalse(manager.addFiles("t-1", setOf(1)))
+        assertFalse(manager.addFiles("t-1", emptySet()))
+        assertTrue(engine.priorityUpdates.value.isEmpty())
+        assertEquals(1, engine.started.value.size)
     }
 }

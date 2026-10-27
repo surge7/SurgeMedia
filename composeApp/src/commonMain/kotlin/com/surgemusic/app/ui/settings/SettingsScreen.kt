@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.surgemusic.app.AppLanguage
 import com.surgemusic.app.ThemeMode
@@ -55,6 +56,12 @@ import kotlin.math.roundToInt
 /**
  * The slice of app settings the Settings tab drives (plan Task 9). Lives in commonMain so
  * the screen compiles there; androidMain's `SettingsStore` implements it directly.
+ *
+ * Storage: [musicFolder] / [videoFolder] hold the user-chosen destination for finished
+ * downloads — a platform-specific path (desktop: absolute filesystem path; android: a
+ * SAF tree URI), or "" for the built-in default (whose display label the
+ * `*FolderDefaultLabel` vals carry). Folder values are opaque to commonMain; only the
+ * platform finalizers interpret them.
  */
 interface AppSettings {
     val wifiOnly: StateFlow<Boolean>
@@ -62,6 +69,14 @@ interface AppSettings {
     val concurrentDownloads: StateFlow<Int>
     val themeMode: StateFlow<ThemeMode>
     val language: StateFlow<AppLanguage>
+    val musicFolder: StateFlow<String>
+    val videoFolder: StateFlow<String>
+
+    /** Display label of the built-in music destination (platform-specific path). */
+    val musicFolderDefaultLabel: String
+
+    /** Display label of the built-in video destination (platform-specific path). */
+    val videoFolderDefaultLabel: String
 
     fun setWifiOnly(enabled: Boolean)
 
@@ -72,6 +87,10 @@ interface AppSettings {
     fun setThemeMode(mode: ThemeMode)
 
     fun setLanguage(language: AppLanguage)
+
+    fun setMusicFolder(path: String)
+
+    fun setVideoFolder(path: String)
 }
 
 /**
@@ -96,6 +115,8 @@ class SettingsViewModel(
     private val sessionRepository: SessionRepository,
     private val settings: AppSettings,
     private val validateSession: suspend () -> Result<Unit>,
+    /** Platform folder picker: shows the chooser and returns the chosen folder (""→null when cancelled). */
+    private val pickFolder: suspend (isVideo: Boolean) -> String? = { null },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -105,6 +126,10 @@ class SettingsViewModel(
     val concurrentDownloads: StateFlow<Int> = settings.concurrentDownloads
     val themeMode: StateFlow<ThemeMode> = settings.themeMode
     val language: StateFlow<AppLanguage> = settings.language
+    val musicFolder: StateFlow<String> = settings.musicFolder
+    val videoFolder: StateFlow<String> = settings.videoFolder
+    val musicFolderDefaultLabel: String get() = settings.musicFolderDefaultLabel
+    val videoFolderDefaultLabel: String get() = settings.videoFolderDefaultLabel
 
     private val _validating = MutableStateFlow(false)
     val validating: StateFlow<Boolean> = _validating.asStateFlow()
@@ -125,6 +150,22 @@ class SettingsViewModel(
     fun applyMirror(url: String) {
         if (url.isNotBlank()) settings.setMirror(url.trim())
     }
+
+    /** Opens the platform folder picker and persists the chosen music folder. */
+    fun pickMusicFolder() {
+        scope.launch { pickFolder(false)?.let(settings::setMusicFolder) }
+    }
+
+    /** Opens the platform folder picker and persists the chosen video folder. */
+    fun pickVideoFolder() {
+        scope.launch { pickFolder(true)?.let(settings::setVideoFolder) }
+    }
+
+    /** Drops the custom music folder — finished music returns to the built-in destination. */
+    fun resetMusicFolder() = settings.setMusicFolder("")
+
+    /** Drops the custom video folder — finished video returns to the built-in destination. */
+    fun resetVideoFolder() = settings.setVideoFolder("")
 
     fun logOut() {
         sessionRepository.clear()
@@ -196,6 +237,8 @@ fun SettingsScreen(
     val concurrentDownloads by viewModel.concurrentDownloads.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
     val language by viewModel.language.collectAsState()
+    val musicFolder by viewModel.musicFolder.collectAsState()
+    val videoFolder by viewModel.videoFolder.collectAsState()
     val validating by viewModel.validating.collectAsState()
     val validationStatus by viewModel.validationStatus.collectAsState()
 
@@ -232,6 +275,17 @@ fun SettingsScreen(
                                 onApplyMirror = viewModel::applyMirror,
                                 concurrentDownloads = concurrentDownloads,
                                 onConcurrentChange = viewModel::setConcurrentDownloads,
+                            )
+                            ScanlineDivider(Modifier.padding(vertical = 16.dp))
+                            StoragePanel(
+                                musicFolder = musicFolder,
+                                videoFolder = videoFolder,
+                                musicDefault = viewModel.musicFolderDefaultLabel,
+                                videoDefault = viewModel.videoFolderDefaultLabel,
+                                onPickMusic = viewModel::pickMusicFolder,
+                                onPickVideo = viewModel::pickVideoFolder,
+                                onResetMusic = viewModel::resetMusicFolder,
+                                onResetVideo = viewModel::resetVideoFolder,
                             )
                         }
                         Column(modifier = Modifier.weight(1f)) {
@@ -273,6 +327,17 @@ fun SettingsScreen(
                         onApplyMirror = viewModel::applyMirror,
                         concurrentDownloads = concurrentDownloads,
                         onConcurrentChange = viewModel::setConcurrentDownloads,
+                    )
+                    ScanlineDivider(Modifier.padding(vertical = 16.dp))
+                    StoragePanel(
+                        musicFolder = musicFolder,
+                        videoFolder = videoFolder,
+                        musicDefault = viewModel.musicFolderDefaultLabel,
+                        videoDefault = viewModel.videoFolderDefaultLabel,
+                        onPickMusic = viewModel::pickMusicFolder,
+                        onPickVideo = viewModel::pickVideoFolder,
+                        onResetMusic = viewModel::resetMusicFolder,
+                        onResetVideo = viewModel::resetVideoFolder,
                     )
                     ScanlineDivider(Modifier.padding(vertical = 16.dp))
                     AboutPanel()
@@ -458,6 +523,88 @@ private fun NetworkPanel(
                 inactiveTrackColor = MaterialTheme.colorScheme.outline,
                 thumbColor = MaterialTheme.colorScheme.primary,
             ),
+        )
+    }
+}
+
+/**
+ * Storage (Settings ▸ Storage): one row per media kind — label, the active destination
+ * (custom path, or the platform default label), Change (platform folder picker) and, when
+ * a custom folder is active, Reset back to the default. The path values are opaque here
+ * (absolute path on desktop, SAF tree URI on android) — only their emptiness is meaningful
+ * to commonMain.
+ */
+@Composable
+private fun StoragePanel(
+    musicFolder: String,
+    videoFolder: String,
+    musicDefault: String,
+    videoDefault: String,
+    onPickMusic: () -> Unit,
+    onPickVideo: () -> Unit,
+    onResetMusic: () -> Unit,
+    onResetVideo: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    SurgePanel(modifier = Modifier.fillMaxWidth()) {
+        SurgeSectionHeader(strings.storageHeader, modifier = Modifier.padding(bottom = 4.dp))
+        Text(
+            strings.storageCaption,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FolderRow(
+            label = strings.musicFolderLabel,
+            path = musicFolder.ifBlank { musicDefault },
+            custom = musicFolder.isNotBlank(),
+            onChange = onPickMusic,
+            onReset = onResetMusic,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        FolderRow(
+            label = strings.videoFolderLabel,
+            path = videoFolder.ifBlank { videoDefault },
+            custom = videoFolder.isNotBlank(),
+            onChange = onPickVideo,
+            onReset = onResetVideo,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun FolderRow(
+    label: String,
+    path: String,
+    custom: Boolean,
+    onChange: () -> Unit,
+    onReset: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val strings = LocalStrings.current
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            if (custom) {
+                SurgeTextButton(
+                    text = strings.resetFolder,
+                    onClick = onReset,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 12.dp),
+                )
+            }
+            SurgeTextButton(text = strings.changeFolder, onClick = onChange)
+        }
+        Text(
+            text = path,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

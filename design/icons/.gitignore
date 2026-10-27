@@ -1,0 +1,5 @@
+# Generated artefacts — reproduce with the scripts in this folder.
+out/
+mockups/
+concepts/preview/
+.DS_Store

@@ -152,7 +152,7 @@ private fun LoginHero(onLogin: () -> Unit) {
             .padding(bottom = 12.dp),
     ) {
         Text(
-            text = strings.loginHeroTitle.uppercase(),
+            text = strings.loginHeroTitle,
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.primary,
         )

@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.surgemusic.app.session.SessionRepository
 import com.surgemusic.app.ui.back.PlatformBackHandler
@@ -46,6 +47,7 @@ import com.surgemusic.app.ui.details.DetailsPanePlaceholder
 import com.surgemusic.app.ui.details.DetailsScreen
 import com.surgemusic.app.ui.downloads.DownloadsScreen
 import com.surgemusic.app.ui.downloads.DownloadsViewModel
+import com.surgemusic.app.ui.downloads.TorrentFilesDialog
 import com.surgemusic.app.ui.library.LibraryScreen
 import com.surgemusic.app.ui.library.LibraryViewModel
 import com.surgemusic.app.ui.search.SearchScreen
@@ -55,6 +57,7 @@ import com.surgemusic.app.ui.settings.SettingsViewModel
 import com.surgemusic.app.ui.strings.AppStrings
 import com.surgemusic.app.ui.strings.LocalStrings
 import com.surgemusic.app.ui.strings.stringsFor
+import com.surgemusic.core.downloads.PreparedTorrent
 import com.surgemusic.core.model.SearchResultRow
 import kotlinx.coroutines.launch
 
@@ -106,8 +109,14 @@ private val ListDetailBreakpoint = 840.dp
  * snackbar with a Retry action — so a transient tracker timeout (e.g. `dl.php` socket
  * timeout) is impossible to miss.
  *
- * [onDownload] is the platform download pipeline (Task 8; androidMain: fetch .torrent →
- * enqueue → start the foreground service).
+ * [onPrepareDownload] and [onStartDownload] are the platform download pipeline in two
+ * steps (Task 8; androidMain: fetch .torrent → enqueue → start the foreground service),
+ * split by the file chooser: prepare fetches+parses the torrent, start enqueues the
+ * user's file selection.
+ *
+ * [windowTopInset] is the strip the shell leaves free at the top of the window: on macOS
+ * the native title bar is an overlay (see `MacWindowChrome`), so that strip is where the
+ * traffic lights live and it is painted in the theme background. It is 0 everywhere else.
  */
 @Composable
 fun App(
@@ -117,7 +126,9 @@ fun App(
     settingsViewModel: SettingsViewModel,
     sessionRepository: SessionRepository,
     loginOverlay: @Composable (onFinished: (Boolean) -> Unit) -> Unit,
-    onDownload: suspend (SearchResultRow) -> Result<Unit>,
+    onPrepareDownload: suspend (SearchResultRow) -> Result<PreparedTorrent>,
+    onStartDownload: suspend (SearchResultRow, PreparedTorrent, Set<Int>) -> Result<Unit>,
+    windowTopInset: Dp = 0.dp,
 ) {
     var currentTab by remember { mutableStateOf(AppTab.Search) }
     var showLogin by remember { mutableStateOf(false) }
@@ -129,6 +140,10 @@ fun App(
     var detailsDownloading by remember { mutableStateOf(false) }
     var detailsAdded by remember { mutableStateOf(false) }
 
+    // File chooser state: a multi-file torrent waits here (row + parsed files) until the
+    // user confirms a selection; single-file/unparsable torrents skip straight to start.
+    var pendingDownload by remember { mutableStateOf<Pair<SearchResultRow, PreparedTorrent>?>(null) }
+
     val session by sessionRepository.session.collectAsState()
     val themeMode by settingsViewModel.themeMode.collectAsState()
     val language by settingsViewModel.language.collectAsState()
@@ -139,14 +154,14 @@ fun App(
     // every language change so the whole shell re-resolves without a restart.
     val strings = remember(language) { stringsFor(language, systemLanguageIsRussian()) }
 
-    // Sticky retry: the snackbar with "Retry" can outlive the initial download attempt. The
-    // download function captures the *current* row via state read, so the retry action can
+    // Sticky retry: the snackbar with "Retry" can outlive the initial attempt. The
+    // download functions capture the *current* row via state read, so the retry action can
     // re-trigger the same lambda after the snackbar fades.
-    suspend fun runDownload(row: SearchResultRow) {
+    suspend fun runStart(row: SearchResultRow, prepared: PreparedTorrent, wantedFiles: Set<Int>) {
         detailsDownloading = true
         detailsError = null
         detailsAdded = false
-        onDownload(row).fold(
+        onStartDownload(row, prepared, wantedFiles).fold(
             onSuccess = {
                 detailsDownloading = false
                 detailsAdded = true
@@ -165,23 +180,55 @@ fun App(
                     duration = SnackbarDuration.Long,
                 )
                 if (retryResult == SnackbarResult.ActionPerformed) {
-                    runDownload(row)
+                    runStart(row, prepared, wantedFiles)
                 }
             },
         )
     }
+    suspend fun runPrepare(row: SearchResultRow) {
+        detailsDownloading = true
+        detailsError = null
+        detailsAdded = false
+        onPrepareDownload(row).fold(
+            onSuccess = { prepared ->
+                detailsDownloading = false
+                if (prepared.files.size > 1) {
+                    // Multi-file torrent: let the user pick what to download.
+                    pendingDownload = row to prepared
+                } else {
+                    runStart(row, prepared, prepared.files.map { it.index }.toSet())
+                }
+            },
+            onFailure = { e ->
+                detailsDownloading = false
+                val message = e.message ?: e::class.simpleName ?: strings.unknownError
+                detailsError = message
+                val retryResult = snackbarHostState.showSnackbar(
+                    message = strings.downloadFailed(message),
+                    actionLabel = strings.actionRetry,
+                    duration = SnackbarDuration.Long,
+                )
+                if (retryResult == SnackbarResult.ActionPerformed) {
+                    runPrepare(row)
+                }
+            },
+        )
+    }
+
 
     val openDetails: (SearchResultRow) -> Unit = { row ->
         selectedRow = row
         detailsError = null
         detailsDownloading = false
         detailsAdded = false
+        pendingDownload = null
     }
     val closeDetails = {
         selectedRow = null
         detailsError = null
         detailsDownloading = false
         detailsAdded = false
+        pendingDownload = null
     }
     val openDownloadsFromDetails = {
         closeDetails()
@@ -190,7 +237,16 @@ fun App(
 
     SurgeMediaTheme(themeMode = themeMode) {
         CompositionLocalProvider(LocalStrings provides strings) {
-            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // macOS: the native title bar is an overlay, so the shell reserves that
+                    // strip at the top and paints it in the theme background — the traffic
+                    // lights live there. 0 on every other platform, where the OS insets the
+                    // content itself.
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(top = windowTopInset),
+            ) {
                 val compact = maxWidth < CompactBreakpoint
                 val twoPane = maxWidth >= ListDetailBreakpoint
 
@@ -211,7 +267,7 @@ fun App(
                                         selected = currentTab == tab,
                                         onClick = { currentTab = tab },
                                         icon = { Icon(tab.icon, contentDescription = tab.label(strings)) },
-                                        label = { Text(tab.label(strings).uppercase()) },
+                                        label = { Text(tab.label(strings)) },
                                         colors = NavigationBarItemDefaults.colors(
                                             selectedIconColor = MaterialTheme.colorScheme.primary,
                                             selectedTextColor = MaterialTheme.colorScheme.primary,
@@ -225,6 +281,19 @@ fun App(
                         }
                     },
                 ) { padding ->
+                    // File chooser — an AlertDialog overlays everything (details, tabs, login)
+                    // while the user picks which files of the torrent to download.
+                    pendingDownload?.let { (row, prepared) ->
+                        TorrentFilesDialog(
+                            files = prepared.files,
+                            onConfirm = { wanted ->
+                                pendingDownload = null
+                                scope.launch { runStart(row, prepared, wanted) }
+                            },
+                            onDismiss = { pendingDownload = null },
+                        )
+                    }
+
                     // Login layer — rendered after (over) the tab area in every tier, so its back
                     // handler also composes last and outranks any details handler while login is up.
                     val loginLayer: @Composable () -> Unit = {
@@ -266,7 +335,7 @@ fun App(
                                 downloading = detailsDownloading,
                                 added = detailsAdded,
                                 error = detailsError,
-                                onDownload = { scope.launch { runDownload(row) } },
+                                onDownload = { scope.launch { runPrepare(row) } },
                                 embedded = embedded,
                             )
                         }
@@ -306,7 +375,7 @@ fun App(
                                             selected = currentTab == tab,
                                             onClick = { currentTab = tab },
                                             icon = { Icon(tab.icon, contentDescription = tab.label(strings)) },
-                                            label = { Text(tab.label(strings).uppercase()) },
+                                            label = { Text(tab.label(strings)) },
                                             colors = NavigationRailItemDefaults.colors(
                                                 selectedIconColor = MaterialTheme.colorScheme.primary,
                                                 unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,

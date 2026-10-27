@@ -31,7 +31,7 @@ fun ThemeMode.isDark(): Boolean = when (this) {
 
 /**
  * Surge Media design system — dual-scheme "Surge" theme (deep-navy dark / paper-white
- * light) with chamfered shapes and mono-labelled typography.
+ * light) with rounded shapes and a compact type scale.
  */
 @Composable
 fun SurgeMediaTheme(

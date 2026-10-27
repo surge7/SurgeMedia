@@ -132,6 +132,23 @@ interface AppStrings {
     fun aboutVersion(version: String): String
     val aboutBody: String
 
+    // Storage (download destination folders)
+    val storageHeader: String
+    val storageCaption: String
+    val musicFolderLabel: String
+    val videoFolderLabel: String
+    val changeFolder: String
+    val resetFolder: String
+
+    // Torrent file chooser
+    val chooseFilesTitle: String
+    val addFilesTitle: String
+    val addFiles: String
+    val downloaded: String
+    val selectAll: String
+    val selectNone: String
+    fun filesSummary(selected: Int, total: Int, selectedSize: String, totalSize: String): String
+
     // Login overlays
     val signInTitle: String
     val saveSession: String
@@ -267,6 +284,22 @@ object EnStrings : AppStrings {
     override val aboutHeader = "About"
     override fun aboutVersion(version: String) = "Surge Media $version"
     override val aboutBody = "Movies, video and music, straight from rutracker to your library."
+
+    override val storageHeader = "Storage"
+    override val storageCaption = "Where finished downloads are saved. Music and video can go to separate folders."
+    override val musicFolderLabel = "Music folder"
+    override val videoFolderLabel = "Video folder"
+    override val changeFolder = "Change"
+    override val resetFolder = "Reset"
+
+    override val chooseFilesTitle = "Choose files to download"
+    override val addFilesTitle = "Add more files to download"
+    override val addFiles = "Add files"
+    override val downloaded = "Downloaded"
+    override val selectAll = "Select all"
+    override val selectNone = "None"
+    override fun filesSummary(selected: Int, total: Int, selectedSize: String, totalSize: String) =
+        "$selected of $total files · $selectedSize of $totalSize"
 
     override val signInTitle = "Sign in"
     override val saveSession = "Save session"
@@ -413,6 +446,22 @@ object RuStrings : AppStrings {
     override val aboutHeader = "О приложении"
     override fun aboutVersion(version: String) = "Surge Media $version"
     override val aboutBody = "Фильмы, видео и музыка — прямо с rutracker в вашу библиотеку."
+
+    override val storageHeader = "Хранилище"
+    override val storageCaption = "Куда сохраняются завершённые загрузки. Музыку и видео можно разнести по разным папкам."
+    override val musicFolderLabel = "Папка для музыки"
+    override val videoFolderLabel = "Папка для видео"
+    override val changeFolder = "Изменить"
+    override val resetFolder = "Сбросить"
+
+    override val chooseFilesTitle = "Выберите файлы для загрузки"
+    override val addFilesTitle = "Добавьте файлы к загрузке"
+    override val addFiles = "Добавить файлы"
+    override val downloaded = "Загружено"
+    override val selectAll = "Выбрать все"
+    override val selectNone = "Ничего"
+    override fun filesSummary(selected: Int, total: Int, selectedSize: String, totalSize: String) =
+        "$selected из $total файлов · $selectedSize из $totalSize"
 
     override val signInTitle = "Вход"
     override val saveSession = "Сохранить сессию"

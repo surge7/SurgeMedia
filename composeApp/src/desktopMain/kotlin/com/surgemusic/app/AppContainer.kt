@@ -5,6 +5,7 @@ import com.surgemusic.app.downloads.DesktopFinalizer
 import com.surgemusic.app.session.FileSessionStore
 import com.surgemusic.app.session.SessionRepository
 import com.surgemusic.app.settings.DesktopSettingsStore
+import com.surgemusic.app.settings.DirectoryPicker
 import com.surgemusic.app.downloads.DesktopLibrary
 import com.surgemusic.app.ui.downloads.DownloadsViewModel
 import com.surgemusic.app.ui.search.SearchViewModel
@@ -12,12 +13,15 @@ import com.surgemusic.app.ui.library.LibraryViewModel
 import com.surgemusic.app.ui.settings.SettingsViewModel
 import com.surgemusic.core.downloads.DownloadManager
 import com.surgemusic.core.downloads.DownloadRequest
+import com.surgemusic.core.downloads.PreparedTorrent
 import com.surgemusic.core.engine.TorrentEngine
 import com.surgemusic.core.engine.jvm.JLibTorrentEngine
 import com.surgemusic.core.model.SearchQuery
 import com.surgemusic.core.model.SearchResultRow
 import com.surgemusic.core.tracker.jvm.RutrackerClient
 import java.nio.file.Path
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Manual DI on desktop (plan Task 6) — the jvm twin of androidMain's [AppContainer]:
@@ -80,34 +84,45 @@ object AppContainer {
     }
 
     /**
-     * Download queue: the finalize hook moves a finished torrent's staged files into
-     * `~/Music/SurgeMedia/<sanitized title>` (audio) or `~/Movies/SurgeMedia/…` (video) via [DesktopFinalizer] (desktop twin of
+     * Download queue: the finalize hook moves a finished torrent's staged files into the
+     * active music / video folders (Settings ▸ Storage; built-ins `~/Music/SurgeMedia`
+     * and `~/Movies/SurgeMedia`) via [DesktopFinalizer] (desktop twin of
      * MediaStoreFinalizer, spec §6 without MediaStore).
      */
     val downloadManager: DownloadManager by lazy {
         DownloadManager(
             engine = engine,
             maxConcurrent = settings.concurrentDownloads.value,
-            finalize = { item, staging -> DesktopFinalizer.finalize(item, staging) },
+            finalize = { item, staging -> DesktopFinalizer(settings).finalize(item, staging) },
         )
     }
 
     /** Downloads view model for the Downloads tab (file deletion via DesktopFileCleaner). */
-    val downloadsViewModel: DownloadsViewModel by lazy { DownloadsViewModel(downloadManager, DesktopFileCleaner) }
+    val downloadsViewModel: DownloadsViewModel by lazy {
+        DownloadsViewModel(downloadManager, DesktopFileCleaner(settings))
+    }
 
     /** Downloaded tab (finalized files on the media libraries). */
-    val libraryViewModel: LibraryViewModel by lazy { LibraryViewModel(DesktopLibrary) }
+    val libraryViewModel: LibraryViewModel by lazy { LibraryViewModel(DesktopLibrary(settings)) }
 
     /**
      * Settings view model for the Settings tab: session management + manual import over
-     * [sessionStore], network prefs over [settings], and the validate probe —
-     * [validateSession] (plan Task 9).
+     * [sessionStore], network prefs over [settings], the validate probe —
+     * [validateSession] (plan Task 9) — and the native folder picker behind
+     * Settings ▸ Storage (the AWT dialog must run on the EDT, i.e. Dispatchers.Main).
      */
     val settingsViewModel: SettingsViewModel by lazy {
         SettingsViewModel(
             sessionRepository = sessionStore,
             settings = settings,
             validateSession = { validateSession() },
+            pickFolder = { isVideo ->
+                withContext(Dispatchers.Main) {
+                    DirectoryPicker.pick(
+                        if (isVideo) "Choose video folder" else "Choose music folder",
+                    )
+                }
+            },
         )
     }
 
@@ -121,27 +136,48 @@ object AppContainer {
         trackerClient().search(SearchQuery(text = "test")).map { }
 
     /**
-     * Full search→download pipeline (plan Task 8): fetch the .torrent, enqueue into
-     * [downloadManager] with a per-topic private staging dir under `~/.surgemusic/staging`.
-     * No service start on desktop (in-process queue — see the class KDoc). Failures (e.g.
-     * expired session on `dl.php`) propagate to the caller — the Search tab surfaces them
-     * as a snackbar.
+     * Search→download, step 1 (plan Task 8, split for the file chooser): fetch the
+     * .torrent for [row] and parse its file list. A parse failure degrades to an empty
+     * list — the chooser is skipped and everything downloads.
      */
-    suspend fun download(row: SearchResultRow): Result<Unit> =
-        trackerClient().torrentFile(row.topicId).map { torrent ->
-            val staging = stagingDir(row.topicId)
-            downloadManager.enqueue(
-                DownloadRequest(
-                    id = "t-${row.topicId}",
-                    topicId = row.topicId,
-                    title = row.title,
-                    forumName = row.forumName,
-                    sizeBytes = row.sizeBytes,
-                ),
-                torrent,
-                staging,
+    suspend fun prepare(row: SearchResultRow): Result<PreparedTorrent> =
+        trackerClient().torrentFile(row.topicId).mapCatching { bytes ->
+            PreparedTorrent(
+                torrentBytes = bytes,
+                files = runCatching { engine.parseFiles(bytes) }.getOrDefault(emptyList()),
             )
         }
+
+    /**
+     * Search→download, step 2: enqueue the prepared torrent with the user's file
+     * selection (empty = all files; the manager forwards it as engine skip priorities)
+     * into [downloadManager] with a per-topic private staging dir under
+     * `~/.surgemusic/staging`. The item's size reflects the selection, so the Downloads
+     * card's byte counters are the selected payload, not the whole torrent. Failures
+     * propagate to the caller — the Search tab surfaces them as a snackbar.
+     */
+    suspend fun startDownload(
+        row: SearchResultRow,
+        prepared: PreparedTorrent,
+        wantedFiles: Set<Int>,
+    ): Result<Unit> = runCatching {
+        val selectedBytes = prepared.files
+            .filter { it.index in wantedFiles }
+            .sumOf { it.sizeBytes }
+            .takeIf { it > 0 } ?: row.sizeBytes
+        downloadManager.enqueue(
+            DownloadRequest(
+                id = "t-${row.topicId}",
+                topicId = row.topicId,
+                title = row.title,
+                forumName = row.forumName,
+                sizeBytes = selectedBytes,
+            ),
+            prepared.torrentBytes,
+            stagingDir(row.topicId),
+            wantedFiles,
+        )
+    }
 
     private fun stagingDir(topicId: Long): String =
         Path.of(System.getProperty("user.home"), DIR_NAME, STAGING_NAME, topicId.toString()).toString()

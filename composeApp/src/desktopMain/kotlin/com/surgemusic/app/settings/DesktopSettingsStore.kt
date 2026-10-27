@@ -59,6 +59,16 @@ class DesktopSettingsStore(
     private val _language = MutableStateFlow(appLanguageOf(props.getProperty(KEY_LANGUAGE)))
     override val language: StateFlow<AppLanguage> = _language.asStateFlow()
 
+    private val _musicFolder = MutableStateFlow(readMusicFolder())
+    override val musicFolder: StateFlow<String> = _musicFolder.asStateFlow()
+
+    private val _videoFolder = MutableStateFlow(readVideoFolder())
+    override val videoFolder: StateFlow<String> = _videoFolder.asStateFlow()
+
+    /** Built-in destinations (Settings ▸ Storage display labels). */
+    override val musicFolderDefaultLabel: String = "~/Music/$BRAND_DIR"
+    override val videoFolderDefaultLabel: String = "~/Movies/$BRAND_DIR"
+
     override fun setWifiOnly(enabled: Boolean) {
         val snapshot = synchronized(ioLock) {
             props.setProperty(KEY_WIFI_ONLY, enabled.toString())
@@ -106,6 +116,26 @@ class DesktopSettingsStore(
         flushAsync(snapshot)
     }
 
+    /** Stores the chosen music folder; "" restores the built-in destination. */
+    override fun setMusicFolder(path: String) {
+        val snapshot = synchronized(ioLock) {
+            props.setProperty(KEY_MUSIC_FOLDER, path)
+            _musicFolder.value = path
+            props.clone() as Properties
+        }
+        flushAsync(snapshot)
+    }
+
+    /** Stores the chosen video folder; "" restores the built-in destination. */
+    override fun setVideoFolder(path: String) {
+        val snapshot = synchronized(ioLock) {
+            props.setProperty(KEY_VIDEO_FOLDER, path)
+            _videoFolder.value = path
+            props.clone() as Properties
+        }
+        flushAsync(snapshot)
+    }
+
     private fun load(): Properties {
         val props = Properties()
         runCatching {
@@ -131,6 +161,9 @@ class DesktopSettingsStore(
     private fun readConcurrentDownloads(): Int =
         props.getProperty(KEY_CONCURRENT_DOWNLOADS)?.toIntOrNull() ?: DEFAULT_CONCURRENT_DOWNLOADS
 
+    private fun readMusicFolder(): String = props.getProperty(KEY_MUSIC_FOLDER) ?: ""
+    private fun readVideoFolder(): String = props.getProperty(KEY_VIDEO_FOLDER) ?: ""
+
     private companion object {
         const val DIR = ".surgemusic"
         const val FILE = "settings.properties"
@@ -139,6 +172,9 @@ class DesktopSettingsStore(
         const val KEY_CONCURRENT_DOWNLOADS = "concurrent_downloads"
         const val KEY_THEME_MODE = "theme_mode"
         const val KEY_LANGUAGE = "language"
+        const val KEY_MUSIC_FOLDER = "music_folder"
+        const val KEY_VIDEO_FOLDER = "video_folder"
+        const val BRAND_DIR = "SurgeMedia"
         const val DEFAULT_WIFI_ONLY = true
         const val DEFAULT_MIRROR = "https://rutracker.org"
         const val DEFAULT_CONCURRENT_DOWNLOADS = 3

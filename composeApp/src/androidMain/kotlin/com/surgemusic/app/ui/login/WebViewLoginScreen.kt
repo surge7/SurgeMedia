@@ -56,7 +56,7 @@ fun WebViewLoginScreen(onFinished: (Boolean) -> Unit) {
     ) {
         Column {
             // Top bar matching SurgeTopBar (commonMain): primary accent bar +
-            // uppercase title, with the existing Cancel action as a SurgeTextButton.
+            // title, with the existing Cancel action as a SurgeTextButton.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -71,7 +71,7 @@ fun WebViewLoginScreen(onFinished: (Boolean) -> Unit) {
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = strings.signInTitle.uppercase(),
+                    text = strings.signInTitle,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )

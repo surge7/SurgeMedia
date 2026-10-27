@@ -1,12 +1,12 @@
 package com.surgemusic.app.ui.theme
 
-import androidx.compose.foundation.shape.CutCornerShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Shapes
 import androidx.compose.ui.unit.dp
 
-/** Surge shapes — chamfered (cut) corners, asymmetric topStart/bottomEnd. */
+/** Surge shapes — softly rounded, the macOS visual idiom. */
 val SurgeShapes = Shapes(
-    small = CutCornerShape(topStart = 4.dp, bottomEnd = 4.dp),
-    medium = CutCornerShape(topStart = 10.dp, bottomEnd = 10.dp),
-    large = CutCornerShape(topStart = 16.dp, bottomEnd = 16.dp),
+    small = RoundedCornerShape(6.dp),
+    medium = RoundedCornerShape(10.dp),
+    large = RoundedCornerShape(16.dp),
 )

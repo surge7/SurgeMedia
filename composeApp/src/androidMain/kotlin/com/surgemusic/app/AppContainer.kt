@@ -20,6 +20,7 @@ import com.surgemusic.app.ui.library.LibraryViewModel
 import com.surgemusic.app.ui.settings.SettingsViewModel
 import com.surgemusic.core.downloads.DownloadManager
 import com.surgemusic.core.downloads.DownloadRequest
+import com.surgemusic.core.downloads.PreparedTorrent
 import com.surgemusic.core.engine.TorrentEngine
 import com.surgemusic.core.engine.jvm.JLibTorrentEngine
 import com.surgemusic.core.model.SearchQuery
@@ -91,59 +92,95 @@ object AppContainer {
     }
 
     /**
+     * SAF folder picker installed by MainActivity (Settings ▸ Storage): shows the
+     * system folder chooser and resolves to the chosen tree URI string, or null when
+     * cancelled. Null until the activity installs it (DI singletons outlive it).
+     */
+    @Volatile
+    var folderPicker: (suspend (isVideo: Boolean) -> String?)? = null
+
+    /**
      * Download queue (Task 8 wiring): the finalize hook moves a finished torrent's staged
-     * files into `Music/SurgeMedia/` / `Movies/SurgeMedia/` via [MediaStoreFinalizer] (spec §6, scoped storage).
+     * files into `Music/SurgeMedia/` / `Movies/SurgeMedia/` — or the user's chosen
+     * folders — via [MediaStoreFinalizer] (spec §6, scoped storage).
      */
     val downloadManager: DownloadManager by lazy {
         DownloadManager(
             engine = engine,
             maxConcurrent = settings.concurrentDownloads.value,
-            finalize = { item, staging -> MediaStoreFinalizer(appContext).finalize(item, staging) },
+            finalize = { item, staging -> MediaStoreFinalizer(appContext, settings).finalize(item, staging) },
         )
     }
 
     /** Downloads view model for the Downloads tab (Task 8; file deletion via MediaStore). */
-    val downloadsViewModel: DownloadsViewModel by lazy { DownloadsViewModel(downloadManager, MediaStoreCleaner(appContext)) }
+    val downloadsViewModel: DownloadsViewModel by lazy {
+        DownloadsViewModel(downloadManager, MediaStoreCleaner(appContext, settings))
+    }
 
     /** Downloaded tab (finalized files on the media libraries). */
-    val libraryViewModel: LibraryViewModel by lazy { LibraryViewModel(MediaStoreLibrary(appContext)) }
+    val libraryViewModel: LibraryViewModel by lazy { LibraryViewModel(MediaStoreLibrary(appContext, settings)) }
 
     /**
      * Settings view model for the Settings tab (Task 9): session management + manual import
-     * over [sessionStore], network prefs over [settings], and the validate probe —
-     * `trackerClient().search(SearchQuery("test"))` (plan Task 9).
+     * over [sessionStore], network prefs over [settings], the validate probe —
+     * `trackerClient().search(SearchQuery("test"))` — and the SAF folder picker behind
+     * Settings ▸ Storage (installed by MainActivity).
      */
     val settingsViewModel: SettingsViewModel by lazy {
         SettingsViewModel(
             sessionRepository = sessionStore,
             settings = settings,
             validateSession = { trackerClient().search(SearchQuery(text = "test")).map { } },
+            pickFolder = { isVideo -> folderPicker?.invoke(isVideo) },
         )
     }
 
     /**
-     * Full search→download pipeline (plan Task 8): fetch the .torrent, enqueue into
-     * [downloadManager] with a per-topic private staging dir, then bring the foreground
-     * service up. Failures (e.g. expired session on `dl.php`) propagate to the caller —
-     * the Search tab surfaces them as a snackbar.
+     * Search→download, step 1 (plan Task 8, split for the file chooser): fetch the
+     * .torrent for [row] and parse its file list. A parse failure degrades to an empty
+     * list — the chooser is skipped and everything downloads.
      */
-    suspend fun download(row: SearchResultRow): Result<Unit> =
-        trackerClient().torrentFile(row.topicId).mapCatching { torrent ->
-            val staging = File(appContext.getExternalFilesDir("staging"), row.topicId.toString())
-                .absolutePath
-            downloadManager.enqueue(
-                DownloadRequest(
-                    id = "t-${row.topicId}",
-                    topicId = row.topicId,
-                    title = row.title,
-                    forumName = row.forumName,
-                    sizeBytes = row.sizeBytes,
-                ),
-                torrent,
-                staging,
+    suspend fun prepare(row: SearchResultRow): Result<PreparedTorrent> =
+        trackerClient().torrentFile(row.topicId).mapCatching { bytes ->
+            PreparedTorrent(
+                torrentBytes = bytes,
+                files = runCatching { engine.parseFiles(bytes) }.getOrDefault(emptyList()),
             )
-            startDownloadService()
         }
+
+    /**
+     * Search→download, step 2: enqueue the prepared torrent with the user's file
+     * selection (empty = all files; the manager forwards it as engine skip priorities)
+     * with a per-topic private staging dir, then bring the foreground service up. The
+     * item's size reflects the selection, so the Downloads card's byte counters are the
+     * selected payload, not the whole torrent. Failures (e.g. an expired session on
+     * `dl.php`) propagate to the caller — the Search tab surfaces them as a snackbar.
+     */
+    suspend fun startDownload(
+        row: SearchResultRow,
+        prepared: PreparedTorrent,
+        wantedFiles: Set<Int>,
+    ): Result<Unit> = runCatching {
+        val selectedBytes = prepared.files
+            .filter { it.index in wantedFiles }
+            .sumOf { it.sizeBytes }
+            .takeIf { it > 0 } ?: row.sizeBytes
+        val staging = File(appContext.getExternalFilesDir("staging"), row.topicId.toString())
+            .absolutePath
+        downloadManager.enqueue(
+            DownloadRequest(
+                id = "t-${row.topicId}",
+                topicId = row.topicId,
+                title = row.title,
+                forumName = row.forumName,
+                sizeBytes = selectedBytes,
+            ),
+            prepared.torrentBytes,
+            staging,
+            wantedFiles,
+        )
+        startDownloadService()
+    }
 
     private val networkGate: NetworkGate by lazy {
         NetworkGate(appContext) { downloadManager.items.value }

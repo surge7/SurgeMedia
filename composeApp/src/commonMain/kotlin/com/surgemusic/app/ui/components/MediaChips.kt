@@ -69,7 +69,7 @@ private fun MediaChip(text: String, color: Color, modifier: Modifier = Modifier)
             .padding(horizontal = 8.dp, vertical = 2.dp),
     ) {
         Text(
-            text = text.uppercase(),
+            text = text,
             style = MaterialTheme.typography.labelSmall,
             color = color,
             maxLines = 1,

@@ -134,7 +134,7 @@ fun DetailsPanePlaceholder(modifier: Modifier = Modifier) {
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = strings.detailsPlaceholderTitle.uppercase(),
+                    text = strings.detailsPlaceholderTitle,
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
                     textAlign = TextAlign.Center,
@@ -211,7 +211,7 @@ private fun ColumnScope.DetailsContent(
 private fun DetailRow(label: String, value: String) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(
-            text = label.uppercase(),
+            text = label,
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

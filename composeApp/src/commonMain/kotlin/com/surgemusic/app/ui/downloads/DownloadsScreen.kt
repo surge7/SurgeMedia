@@ -47,6 +47,7 @@ import com.surgemusic.app.ui.strings.LocalStrings
 import com.surgemusic.core.downloads.DownloadItem
 import com.surgemusic.core.downloads.DownloadManager
 import com.surgemusic.core.downloads.DownloadState
+import com.surgemusic.core.engine.TorrentFileInfo
 import com.surgemusic.core.model.MediaInfo
 import com.surgemusic.core.model.SizeParser
 import kotlinx.coroutines.CoroutineScope
@@ -96,6 +97,16 @@ class DownloadsViewModel(
     fun resume(id: String) = manager.resume(id)
 
     fun cancel(id: String) = manager.cancel(id)
+
+    /** Parsed file list of the item's staged torrent (chooser data source; empty = unparsable). */
+    fun torrentFiles(id: String): List<TorrentFileInfo> = manager.torrentFiles(id)
+
+    /** The item's wanted file set (empty set = every file, engine semantics). */
+    fun wantedFiles(id: String): Set<Int> = manager.wantedFiles(id)
+
+    /** Extends the item's selection with [newFileIndices] — the "Add files" flow. */
+    fun addFiles(item: DownloadItem, newFileIndices: Set<Int>): Boolean =
+        manager.addFiles(item.request.id, newFileIndices)
 
     fun remove(id: String) = manager.remove(id)
 
@@ -180,6 +191,7 @@ fun DownloadsScreen(
 
     val message by viewModel.message.collectAsState()
     var pendingDeleteItem by remember { mutableStateOf<DownloadItem?>(null) }
+    var pendingAddItem by remember { mutableStateOf<DownloadItem?>(null) }
     var showDeleteAll by remember { mutableStateOf(false) }
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -215,8 +227,15 @@ fun DownloadsScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(items, key = { it.request.id }) { item ->
+                    val files = viewModel.torrentFiles(item.request.id)
+                    val wanted = viewModel.wantedFiles(item.request.id)
                     DownloadCard(
                         item = item,
+                        onAddFiles = if (canAddFiles(item, files, wanted)) {
+                            { pendingAddItem = item }
+                        } else {
+                            null
+                        },
                         onPause = { viewModel.pause(item.request.id) },
                         onResume = { viewModel.resume(item.request.id) },
                         onCancel = { viewModel.cancel(item.request.id) },
@@ -239,6 +258,21 @@ fun DownloadsScreen(
         )
     }
 
+    pendingAddItem?.let { item ->
+        // The button gate (canAddFiles) guarantees a parsed multi-file torrent here.
+        TorrentFilesDialog(
+            files = viewModel.torrentFiles(item.request.id),
+            title = strings.addFilesTitle,
+            confirmLabel = strings.addFiles,
+            lockedIndices = viewModel.wantedFiles(item.request.id),
+            onConfirm = { newFileIndices ->
+                pendingAddItem = null
+                viewModel.addFiles(item, newFileIndices)
+            },
+            onDismiss = { pendingAddItem = null },
+        )
+    }
+
     if (showDeleteAll) {
         SurgeConfirmDialog(
             text = strings.confirmDeleteAllFiles,
@@ -254,6 +288,7 @@ fun DownloadsScreen(
 @Composable
 private fun DownloadCard(
     item: DownloadItem,
+    onAddFiles: (() -> Unit)?,
     onPause: () -> Unit,
     onResume: () -> Unit,
     onCancel: () -> Unit,
@@ -308,6 +343,13 @@ private fun DownloadCard(
                     text = strings.cancel,
                     onClick = onCancel,
                     tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+            onAddFiles?.let { addFiles ->
+                SurgeTextButton(
+                    text = strings.addFiles,
+                    onClick = addFiles,
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
@@ -398,3 +440,15 @@ private val ACTIVE_STATES =
 
 private val TERMINAL_STATES =
     setOf(DownloadState.DONE, DownloadState.FAILED, DownloadState.CANCELLED)
+
+/** States the "Add files" flow can extend (QUEUED starts fresh; FINALIZING is in flight). */
+private val ADDABLE_STATES =
+    setOf(DownloadState.DOWNLOADING, DownloadState.PAUSED, DownloadState.DONE)
+
+/**
+ * "Add files" availability: a parsed multi-file torrent with something not yet selected.
+ * `wanted` empty means every file was selected (engine semantics), and a full explicit
+ * selection leaves nothing to add either.
+ */
+private fun canAddFiles(item: DownloadItem, files: List<TorrentFileInfo>, wanted: Set<Int>): Boolean =
+    item.state in ADDABLE_STATES && files.size > 1 && wanted.isNotEmpty() && wanted.size < files.size
