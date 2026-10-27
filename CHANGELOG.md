@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-10-27)
 
 - New app icon: a cyberpunk "Surge Wave" mark — a neon waveform with a trailing
   magenta echo — rebuilt as vector art on the app's own palette. The macOS `.app`

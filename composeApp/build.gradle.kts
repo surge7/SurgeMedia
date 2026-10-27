@@ -89,8 +89,8 @@ android {
         applicationId = "com.surgemusic.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.2.0"
+        versionCode = 2
+        versionName = "0.3.0"
     }
     // Env-driven release signing: when all four SURGEMUSIC_* vars are present (store
     // upload, CI secret), releases are signed with the real keystore.
