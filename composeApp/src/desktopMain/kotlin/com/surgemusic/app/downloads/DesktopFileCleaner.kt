@@ -1,5 +1,6 @@
 package com.surgemusic.app.downloads
 
+import com.surgemusic.app.VideoLibraryParent
 import com.surgemusic.app.settings.DesktopSettingsStore
 import com.surgemusic.core.downloads.DownloadItem
 import java.io.File
@@ -9,7 +10,8 @@ import kotlinx.coroutines.withContext
 /**
  * Desktop twin of androidMain's `MediaStoreCleaner`: deletes finalized files under the
  * app's library roots — the active music / video folders (Settings ▸ Storage; built-in
- * `~/Music/SurgeMedia/` and `~/Movies/SurgeMedia/`) plus the pre-rebrand
+ * `~/Music/SurgeMedia/` and `~/Movies|Videos/SurgeMedia/` — macOS `Movies`,
+ * Windows/Linux `Videos`) plus the pre-rebrand
  * `~/Music/SurgeMusic/` root so files finalized by older builds stay deletable.
  * [deleteFor] removes this album's directory under every root, [deleteAll] sweeps every
  * child of every root. A sweep that matches nothing is still [Result.success] with 0.
@@ -20,7 +22,7 @@ class DesktopFileCleaner(private val settings: DesktopSettingsStore) : DownloadF
     private fun roots(): List<File> {
         val home = File(System.getProperty("user.home"))
         val builtinMusic = File(home, "Music/$BRAND_DIR")
-        val builtinMovies = File(home, "Movies/$BRAND_DIR")
+        val builtinMovies = File(home, "$VideoLibraryParent/$BRAND_DIR")
         val music = settings.musicFolder.value.ifBlank { builtinMusic.absolutePath }
         val movies = settings.videoFolder.value.ifBlank { builtinMovies.absolutePath }
         return buildList {
@@ -54,7 +56,7 @@ class DesktopFileCleaner(private val settings: DesktopSettingsStore) : DownloadF
         val home = File(System.getProperty("user.home"))
         return listOf(
             File(home, "Music/$BRAND_DIR"),
-            File(home, "Movies/$BRAND_DIR"),
+            File(home, "$VideoLibraryParent/$BRAND_DIR"),
             File(home, "Music/$BRAND_DIR_LEGACY"),
         )
     }

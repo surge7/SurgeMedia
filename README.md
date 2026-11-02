@@ -2,9 +2,10 @@
 
 Search rutracker.org for movies, video, music and books, and download them with a
 built-in torrent client straight into your media libraries (audio → `Music/`,
-video → `Movies/`). Dark and light themes (System / Light / Dark in Settings),
-English and Russian UI (System / English / Русский in Settings ▸ Appearance).
-Android app + macOS desktop from one Kotlin Multiplatform codebase.
+video → `Movies/` on macOS, `Videos/` on Windows/Linux). Dark and light themes
+(System / Light / Dark in Settings), English and Russian UI (System / English /
+Русский in Settings ▸ Appearance).
+Android app + macOS & Windows 11 desktop from one Kotlin Multiplatform codebase.
 
 **Status:** 0.2.0 — Android app live-verified against rutracker.org; production
 releases via GitHub / GitVerse / RuStore (see [`docs/PUBLISHING.md`](docs/PUBLISHING.md)).
@@ -37,6 +38,29 @@ keystore — testing only):
 
 Publishing to GitHub / GitVerse / RuStore: [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
 Privacy policy (EN/RU): [`docs/PRIVACY.md`](docs/PRIVACY.md). License: MIT.
+
+## macOS & Windows desktop
+
+The desktop app is the same Compose Multiplatform UI as Android — same screens,
+themes, login flow and libtorrent engine — packaged natively per platform.
+
+Run from source (JDK 21, any of macOS / Windows / Linux):
+
+    ./gradlew :composeApp:run
+
+Package installers (each format builds on its own OS — DMG on macOS,
+MSI + EXE installer on Windows 11 x64):
+
+    ./gradlew :composeApp:packageDmg         # macOS: build/compose/binaries/main/dmg
+    ./gradlew :composeApp:packageMsi         # Windows: build/compose/binaries/main/msi
+    ./gradlew :composeApp:packageExe         # Windows: build/compose/binaries/main/exe
+
+The Windows MSI installs per-user (no admin rights), adds Start-menu shortcuts,
+and carries the same jlibtorrent native engine (x64) as the other platforms —
+each installer ships only its own OS's native. The native title bar follows the
+app theme on both platforms (macOS overlay / Windows 11 DWM caption colour).
+The desktop sign-in flow finds Chrome, Edge (preinstalled on Windows 11),
+Yandex, Brave, Chromium or Opera automatically.
 
 **Localization:** the UI ships English and Russian. Settings ▸ Appearance ▸ Language
 (System / English / Русский) switches instantly and survives restarts; download

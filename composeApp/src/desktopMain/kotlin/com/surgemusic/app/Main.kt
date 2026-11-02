@@ -1,6 +1,7 @@
 package com.surgemusic.app
 
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
@@ -21,12 +22,17 @@ import kotlinx.coroutines.delay
  * macOS chrome: the native title bar is turned into an overlay (see [MacWindowChrome]) so
  * the app paints the top strip in its own theme colour instead of AppKit painting it with
  * the system appearance. The traffic lights and drag-to-move stay native.
+ *
+ * Windows chrome: the caption cannot be handed to the app, so [WindowsWindowChrome] paints
+ * it in the theme colours via DWM (dark-mode flag on Windows 10) — same visual contract,
+ * platform-native mechanics. The title-bar height stays 0: Windows insets the content
+ * itself, like every non-macOS platform.
  */
 fun main() {
     // AWT reads the application appearance once, while the toolkit starts, so it has to be
     // set before any window exists. "system" makes the native chrome — and the native menu
-    // bar — follow the OS appearance instead of being pinned to Aqua.
-    System.setProperty("apple.awt.application.appearance", "system")
+    // bar — follow the OS appearance instead of being pinned to Aqua. (macOS-only property.)
+    if (IsMacOs) System.setProperty("apple.awt.application.appearance", "system")
 
     // Height of the native title bar the shell has to leave free at the top of the window
     // (that is where the traffic lights live). Measured, not assumed; 0 off macOS, where
@@ -50,7 +56,7 @@ fun main() {
             // every time it is un-hidden from the tray.
             NativeTitleBarOverlay()
 
-            val (themeMode, systemDark, background) = rememberResolvedTheme()
+            val theme = rememberResolvedTheme()
 
             // Record the window facts once the native window has settled, so the geometry
             // and the painted colour can be checked from outside the process.
@@ -59,7 +65,22 @@ fun main() {
                     if (isFullWindowContent(window)) break
                     delay(50)
                 }
-                writeWindowDiagnostic(window, titleBarHeight, themeMode, systemDark, background)
+                writeWindowDiagnostic(window, titleBarHeight, theme.themeMode, theme.systemDark, theme.background)
+            }
+
+            // Windows caption in the app's own theme colours — the Windows 11 twin of the
+            // macOS title-bar overlay above. Re-applied when the theme changes; the DWM
+            // calls are best-effort (no-op off Windows, on Windows 10 only the dark flag).
+            if (IsWindows) {
+                LaunchedEffect(window, theme.themeMode, theme.systemDark) {
+                    while (!window.isShowing) delay(50)
+                    WindowsWindowChrome.apply(
+                        window,
+                        captionArgb = theme.background.toArgb(),
+                        textArgb = theme.onSurface.toArgb(),
+                        dark = theme.dark,
+                    )
+                }
             }
 
             // App() applies SurgeMediaTheme itself (commonMain App.kt) — wrapping again here

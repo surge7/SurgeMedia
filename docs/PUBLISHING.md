@@ -50,14 +50,26 @@ APK path: `composeApp/build/outputs/apk/release/composeApp-release.apk`
 
    Attach the APK's SHA-256 to the release notes (`shasum -a 256 <apk>`).
 
+   **Windows artifacts:** the `ci` workflow's `windows` job packages the Windows 11 x64
+   installers on every push and uploads them as the `SurgeMedia-windows-x64` artifact —
+   download it (`gh run download -n SurgeMedia-windows-x64`) and attach both files to the
+   release alongside the APK:
+   `SurgeMedia-1.0.0.msi` (per-user installer, Start-menu shortcuts) and
+   `SurgeMedia-1.0.0.exe` (installer variant, same payload). Attach their SHA-256s too
+   (`shasum -a 256 …`). The installers are unsigned — SmartScreen will show
+   "Windows protected your PC" → *More info* → *Run anyway* until a code-signing
+   certificate is added (optional later; Authenticode signing hooks into the same job).
+
 3. Privacy-policy URL for listings: `https://github.com/surge7/SurgeMedia/blob/main/docs/PRIVACY.md`.
 
 4. Protect `main` (require the `ci` workflow) once team flow matters. CI already runs on
    every push/PR: `:core:jvmTest`, `:cli:build`, `:composeApp:assembleDebug`,
-   `:composeApp:testDebugUnitTest`, `:composeApp:jvmTest`.
+   `:composeApp:testDebugUnitTest`, `:composeApp:jvmTest` (ubuntu), and the same JVM tests
+   plus `:composeApp:packageDistributionForCurrentOS` (Windows — MSI/EXE artifacts).
 
 5. Optional later: a `release` workflow that builds the signed APK from repo secrets
-   (`SURGEMUSIC_KEYSTORE_BASE64` + the four vars) instead of a local keystore.
+   (`SURGEMUSIC_KEYSTORE_BASE64` + the four vars) instead of a local keystore, and
+   attaches the Windows installers from the tag build automatically.
 
 ## 2. GitVerse (code mirror)
 

@@ -61,6 +61,11 @@ object BrowserLoginCapture {
      * First Chromium-based browser found, in preference order (Chrome, Edge, Yandex,
      * Brave, Chromium, Opera). `$CHROME_BIN` wins when set (handy on CI). Null when no
      * supported browser is installed — the UI then falls back to manual import.
+     *
+     * Windows looks in `Program Files`, `Program Files (x86)` and `%LOCALAPPDATA%`
+     * (Chromium browsers install per-user by default, so the last one is the common
+     * location for Yandex/Brave/Chromium/Opera). Edge ships preinstalled on Windows 11,
+     * so browser sign-in works out of the box there.
      */
     fun findChromiumBrowser(): Path? {
         System.getenv("CHROME_BIN")?.takeIf { Files.isExecutable(Path.of(it)) }?.let { return Path.of(it) }
@@ -74,6 +79,25 @@ object BrowserLoginCapture {
                 yield("/Applications/Chromium.app/Contents/MacOS/Chromium")
                 yield("/Applications/Opera.app/Contents/MacOS/Opera")
                 yield("$home/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+            } else if (System.getProperty("os.name").startsWith("Windows")) {
+                val pf = System.getenv("ProgramFiles") ?: "C:\\Program Files"
+                val pf86 = System.getenv("ProgramFiles(x86)") ?: "C:\\Program Files (x86)"
+                val lad = System.getenv("LOCALAPPDATA") ?: "$home\\AppData\\Local"
+                // Chrome: machine-wide (64-bit in Program Files, 32-bit in (x86)) or per-user.
+                yield("$pf\\Google\\Chrome\\Application\\chrome.exe")
+                yield("$pf86\\Google\\Chrome\\Application\\chrome.exe")
+                yield("$lad\\Google\\Chrome\\Application\\chrome.exe")
+                // Edge: ships preinstalled on Windows 11; the classic install root is (x86).
+                yield("$pf86\\Microsoft\\Edge\\Application\\msedge.exe")
+                yield("$pf\\Microsoft\\Edge\\Application\\msedge.exe")
+                yield("$lad\\Microsoft\\Edge\\Application\\msedge.exe")
+                yield("$lad\\Yandex\\YandexBrowser\\Application\\browser.exe")
+                yield("$pf\\Yandex\\YandexBrowser\\Application\\browser.exe")
+                yield("$pf\\BraveSoftware\\Brave-Browser\\Application\\brave.exe")
+                yield("$lad\\BraveSoftware\\Brave-Browser\\Application\\brave.exe")
+                yield("$lad\\Chromium\\Application\\chrome.exe")
+                yield("$lad\\Programs\\Opera\\opera.exe")
+                yield("$pf\\Opera\\opera.exe")
             } else {
                 yield("/usr/bin/google-chrome-stable")
                 yield("/usr/bin/google-chrome")

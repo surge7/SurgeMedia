@@ -180,11 +180,26 @@ internal fun writeWindowDiagnostic(
 }
 
 /**
- * Snapshot of the theme the shell is currently painting with, for the diagnostic file.
- * Mirrors `SurgeMediaTheme`'s own resolution so the logged colour is the one on screen.
+ * Snapshot of the theme the shell is currently painting with — background for the native
+ * chrome (macOS overlay strip / Windows caption) and the matching text colour.
  */
+internal data class ResolvedTheme(
+    val themeMode: ThemeMode,
+    val systemDark: Boolean,
+    val background: Color,
+    val onSurface: Color,
+) {
+    /** Whether the resolved theme is dark (the Windows caption fallback needs the flag). */
+    val dark: Boolean
+        get() = when (themeMode) {
+            ThemeMode.SYSTEM -> systemDark
+            ThemeMode.LIGHT -> false
+            ThemeMode.DARK -> true
+        }
+}
+
 @Composable
-internal fun rememberResolvedTheme(): Triple<ThemeMode, Boolean, Color> {
+internal fun rememberResolvedTheme(): ResolvedTheme {
     val systemDark = isSystemInDarkTheme()
     val themeMode = AppContainer.settings.themeMode.value
     val dark = when (themeMode) {
@@ -192,10 +207,12 @@ internal fun rememberResolvedTheme(): Triple<ThemeMode, Boolean, Color> {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    val background = if (dark) {
-        com.surgemusic.app.ui.theme.SurgeDarkColors.background
-    } else {
-        com.surgemusic.app.ui.theme.SurgeLightColors.background
-    }
-    return Triple(themeMode, systemDark, background)
+    val darkColors = com.surgemusic.app.ui.theme.SurgeDarkColors
+    val lightColors = com.surgemusic.app.ui.theme.SurgeLightColors
+    return ResolvedTheme(
+        themeMode = themeMode,
+        systemDark = systemDark,
+        background = if (dark) darkColors.background else lightColors.background,
+        onSurface = if (dark) darkColors.onSurface else lightColors.onSurface,
+    )
 }

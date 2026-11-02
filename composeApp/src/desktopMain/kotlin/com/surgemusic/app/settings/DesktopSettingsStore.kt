@@ -2,6 +2,7 @@ package com.surgemusic.app.settings
 
 import com.surgemusic.app.AppLanguage
 import com.surgemusic.app.ThemeMode
+import com.surgemusic.app.VideoLibraryParent
 import com.surgemusic.app.appLanguageOf
 import com.surgemusic.app.themeModeOf
 import com.surgemusic.app.ui.settings.AppSettings
@@ -67,7 +68,7 @@ class DesktopSettingsStore(
 
     /** Built-in destinations (Settings ▸ Storage display labels). */
     override val musicFolderDefaultLabel: String = "~/Music/$BRAND_DIR"
-    override val videoFolderDefaultLabel: String = "~/Movies/$BRAND_DIR"
+    override val videoFolderDefaultLabel: String = "~/$VideoLibraryParent/$BRAND_DIR"
 
     override fun setWifiOnly(enabled: Boolean) {
         val snapshot = synchronized(ioLock) {

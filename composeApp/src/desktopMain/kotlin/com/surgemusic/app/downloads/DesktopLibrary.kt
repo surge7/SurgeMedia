@@ -1,5 +1,6 @@
 package com.surgemusic.app.downloads
 
+import com.surgemusic.app.VideoLibraryParent
 import com.surgemusic.app.settings.DesktopSettingsStore
 import java.io.File
 import java.nio.file.Path
@@ -10,7 +11,8 @@ import kotlinx.coroutines.withContext
  * Downloaded tab on desktop (desktopMain twin of androidMain's `MediaStoreLibrary`):
  * enumerates and deletes what [DesktopFinalizer] moved into the user's libraries — the
  * active music / video folders (Settings ▸ Storage; built-in `~/Music/SurgeMedia` and
- * `~/Movies/SurgeMedia`), plus the pre-rebrand `~/Music/SurgeMusic/` root so files from
+ * `~/Movies|Videos/SurgeMedia` — macOS `Movies`, Windows/Linux `Videos`), plus the
+ * pre-rebrand `~/Music/SurgeMusic/` root so files from
  * older builds stay visible and deletable. Files directly under a root (empty-title
  * edge) are grouped under [DownloadedRelease.UNTITLED]. A scan that finds nothing is
  * [Result.success] with an empty list.
@@ -20,7 +22,7 @@ class DesktopLibrary(private val settings: DesktopSettingsStore) : DownloadedLib
     /** (rootId, directory, kindLabel) — the roots the finalizer writes to, under [home]. */
     private fun roots(home: Path = Path.of(System.getProperty("user.home"))): List<Triple<String, Path, String>> {
         val music = customOr(settings.musicFolder.value, home.resolve("Music/$BRAND_DIR"))
-        val movies = customOr(settings.videoFolder.value, home.resolve("Movies/$BRAND_DIR"))
+        val movies = customOr(settings.videoFolder.value, home.resolve("$VideoLibraryParent/$BRAND_DIR"))
         return buildList {
             if (music != movies) {
                 add(Triple("music", music, "Music"))
@@ -34,8 +36,8 @@ class DesktopLibrary(private val settings: DesktopSettingsStore) : DownloadedLib
             if (music.toString() != home.resolve("Music/$BRAND_DIR").toString()) {
                 add(Triple("music_builtin", home.resolve("Music/$BRAND_DIR"), "Music"))
             }
-            if (movies.toString() != home.resolve("Movies/$BRAND_DIR").toString()) {
-                add(Triple("movies_builtin", home.resolve("Movies/$BRAND_DIR"), "Movies"))
+            if (movies.toString() != home.resolve("$VideoLibraryParent/$BRAND_DIR").toString()) {
+                add(Triple("movies_builtin", home.resolve("$VideoLibraryParent/$BRAND_DIR"), "Movies"))
             }
             add(Triple("music_legacy", home.resolve("Music/$BRAND_DIR_LEGACY"), "Music"))
         }
@@ -100,7 +102,7 @@ class DesktopLibrary(private val settings: DesktopSettingsStore) : DownloadedLib
         val home = Path.of(System.getProperty("user.home"))
         return listOf(
             home.resolve("Music/$BRAND_DIR"),
-            home.resolve("Movies/$BRAND_DIR"),
+            home.resolve("$VideoLibraryParent/$BRAND_DIR"),
             home.resolve("Music/$BRAND_DIR_LEGACY"),
         )
     }

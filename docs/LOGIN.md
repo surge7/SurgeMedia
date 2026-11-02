@@ -37,6 +37,10 @@ Details worth knowing:
 - The Cookie and User-Agent always come from the **same browser window**, so
   the Cloudflare `cf_clearance` binding is satisfied by construction — the
   classic "works in browser, rejected in app" mismatch cannot happen.
+- The supported browsers are Chrome, Edge, Yandex, Brave, Chromium and Opera.
+  On Windows 11, **Edge is preinstalled**, so the one-click sign-in works out
+  of the box (the app looks in `Program Files`, `Program Files (x86)` and
+  `%LOCALAPPDATA%`); on macOS it checks `/Applications`, on Linux the PATH.
 - If the button says no Chromium browser was found, install Chrome/Edge/Yandex
   or use manual import below.
 
@@ -169,6 +173,10 @@ file readable only by your user.
 - Cookie и User-Agent всегда берутся из **одного и того же окна браузера**, поэтому
   привязка `cf_clearance` Cloudflare к User-Agent соблюдается автоматически —
   классическое «в браузере работает, в приложении нет» здесь невозможно.
+- Поддерживаются Chrome, Edge, Яндекс Браузер, Brave, Chromium и Opera.
+  В Windows 11 **Edge предустановлен**, поэтому вход в один клик работает сразу
+  (приложение смотрит в `Program Files`, `Program Files (x86)` и
+  `%LOCALAPPDATA%`); на macOS — `/Applications`, на Linux — PATH.
 - Если кнопка сообщает, что браузер на Chromium не найден — установите
   Chrome/Edge/Яндекс Браузер или используйте ручной импорт ниже.
 

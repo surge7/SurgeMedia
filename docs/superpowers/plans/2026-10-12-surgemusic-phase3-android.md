@@ -6,7 +6,7 @@
 
 **Architecture:** Extend the Phase-1 `:core` KMP module with an `androidTarget` and an intermediate `jvmShared` source set (current `jvmMain` code — RutrackerClient, SearchPageParser, JLibTorrentEngine — becomes shared by desktop-JVM and Android). New `:composeApp` module (Compose Multiplatform): `commonMain` holds screens + view models (reused later by the desktop UI), `androidMain` holds the Activity, foreground service, WebView login, MediaStore finalizer and encrypted session store. Manual DI via an `AppContainer` singleton. (Order change vs. spec roadmap recorded in spec §15: user moved Android ahead of the desktop UI.)
 
-**Tech Stack:** everything from Phase 1 + AGP 8.10.1, Compose Multiplatform 1.8.1 (Kotlin 2.1.20, compose compiler plugin), activity-compose 1.9.3. compileSdk 36, targetSdk 35, minSdk 29.
+**Tech Stack:** everything from Phase 1 + AGP 8.13.2, Compose Multiplatform 1.8.1 (Kotlin 2.1.20, compose compiler plugin), activity-compose 1.9.3. compileSdk 36, targetSdk 35, minSdk 29.
 
 **Spec:** `docs/superpowers/specs/2026-10-12-surgemusic-design.md` (esp. §4 "Cloudflare reality", §6 storage, §8 UI). The plan argues from the spec; read both.
 
@@ -39,7 +39,7 @@ Add to `gradle/libs.versions.toml`:
 ```toml
 [versions]
 # existing versions stay; add:
-agp = "8.10.1"
+agp = "8.13.2"
 
 [libraries]
 # add:
@@ -608,4 +608,4 @@ class MediaStoreFinalizer(private val context: Context) {
 1. **Spec coverage:** Android app per spec §6 (scoped storage via MediaStore, FGS, Wi-Fi gate), §8 (Search/Downloads/Settings screens), §9 (Keystore-encrypted session), §4 (WebView login solves the Cloudflare reality — the spec's planned mechanism). DB persistence and mirror fail-over remain hardening-phase items (deviations recorded above). Desktop UI reuses Tasks 3–6, 8 (commonMain).
 2. **Placeholders:** none — every step names files and carries code or exact commands. Task 4's icon is hand-written XML.
 3. **Type consistency:** `EngineEvent(id, …)`/`TorrentEngine.start/pause/resume/cancel/events/snapshot` (Task 2) match `FakeEngine`/`DownloadManager` (Task 3) and the service/finalizer usage (Tasks 7–8); `SessionRepository`/`Session` (Task 5) match Search/Settings usage; `DownloadRequest/Item/State` names consistent throughout.
-4. **Known risk:** AGP/CMP/Kotlin version matrix — pinned to a compatible set (Kotlin 2.1.20 + CMP 1.8.1 + AGP 8.10.1 + Gradle 8.14); gate failures on version issues must be resolved by adjusting versions in `libs.versions.toml` only, never by hacking module scripts beyond these pins.
+4. **Known risk:** AGP/CMP/Kotlin version matrix — pinned to a compatible set (Kotlin 2.1.20 + CMP 1.8.1 + AGP 8.13.2 + Gradle 8.14.6); gate failures on version issues must be resolved by adjusting versions in `libs.versions.toml` only, never by hacking module scripts beyond these pins.

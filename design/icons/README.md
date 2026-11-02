@@ -6,7 +6,7 @@ by a thin magenta echo line. It is cyberpunk-neon on the app's own dark palette
 `composeApp/.../ui/theme/Color.kt`).
 
 Everything is authored from **one polyline** in `build_icon.py`, so the macOS
-`.icns` and the Android VectorDrawable cannot drift apart.
+`.icns`, the Windows `.ico` and the Android VectorDrawable cannot drift apart.
 
 ## Layout
 
@@ -17,6 +17,7 @@ concepts/            six AI-generated directions explored before the final mark
 build_icon.py        the single source of truth: geometry -> SVG + VectorDrawable
 shapes.py            superellipse / circle / rounded-rect path data
 render_macos.sh      SVG -> macOS .icns (Apple grid, native render per size)
+render_windows.sh    SVG -> Windows .ico (same grid as macOS, sizes 16-256)
 render_android.sh    SVG -> Android adaptive previews (circle / squircle / themed)
 mockups.sh           renders every concept with real platform masks
 review-sheet.sh      side-by-side sheet of all concepts at dock sizes
@@ -29,19 +30,22 @@ final-sheet.sh       verification sheet for the finished mark
 cd design/icons
 python3 build_icon.py        # SVG sources + Android VectorDrawables
 ./render_macos.sh            # out/SurgeMedia.icns
+./render_windows.sh          # out/SurgeMedia.ico
 ./render_android.sh          # out/android/*.png previews
 ./final-sheet.sh             # final-sheet.png
 ```
 
-`render_macos.sh` renders every `.icns` size natively through Chrome, so the
-neon bloom is not destroyed by downscaling. The generated `.icns` is committed
-to `composeApp/src/desktopMain/resources/icons/SurgeMedia.icns`; the `out/`
-folder is a build artefact.
+`render_macos.sh` and `render_windows.sh` render every size natively through
+Chrome, so the neon bloom is not destroyed by downscaling. The generated
+`.icns` / `.ico` are committed to
+`composeApp/src/desktopMain/resources/icons/`; the `out/` folder is a build
+artefact.
 
 ## Platform rules this artwork respects
 
-**macOS** — the squircle occupies 824/1024 of the canvas (Apple's grid) with the
-artwork at 92% of the squircle width. The shape is a true superellipse
+**macOS / Windows** — the squircle occupies 824/1024 of the canvas (Apple's
+grid) with the artwork at 92% of the squircle width, shared by both desktop
+platforms for a single brand mark. The shape is a true superellipse
 (`n = 5`), not a rounded rectangle.
 
 **Android** — the adaptive icon lives on a 108dp canvas. The launcher masks a

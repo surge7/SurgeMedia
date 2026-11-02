@@ -1,5 +1,6 @@
 package com.surgemusic.app.downloads
 
+import com.surgemusic.app.VideoLibraryParent
 import com.surgemusic.app.settings.DesktopSettingsStore
 import com.surgemusic.core.downloads.DownloadItem
 import java.io.File
@@ -14,7 +15,8 @@ import kotlinx.coroutines.withContext
  * Desktop twin of androidMain's `MediaStoreFinalizer` (plan Task 6): moves a finished
  * torrent's staged media files into the user's library — audio + cover art under the
  * music folder, video under the video folder (Settings ▸ Storage; built-in defaults
- * `~/Music/SurgeMedia/<title>/…` and `~/Movies/SurgeMedia/…`) — with `Files.move`.
+ * `~/Music/SurgeMedia/<title>/…` and `~/Movies|Videos/SurgeMedia/…` — macOS uses
+ * `Movies`, Windows/Linux `Videos`) — with `Files.move`.
  * (Files finalized by pre-rebrand builds live under `~/Music/SurgeMusic`;
  * [DesktopFileCleaner] sweeps that root too.)
  *
@@ -44,7 +46,7 @@ class DesktopFinalizer(private val settings: DesktopSettingsStore) {
     private fun musicRoot(): Path = root(settings.musicFolder.value, "Music")
 
     /** Destination root for finished video; the custom folder or the built-in default. */
-    private fun videoRoot(): Path = root(settings.videoFolder.value, "Movies")
+    private fun videoRoot(): Path = root(settings.videoFolder.value, VideoLibraryParent)
 
     private fun root(custom: String, defaultParent: String): Path =
         if (custom.isBlank()) {

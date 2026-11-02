@@ -1,5 +1,15 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+// Host OS selector for the desktop jlibtorrent native, below. Values: "mac" | "windows" | "linux".
+val hostOs: String = run {
+    val name = System.getProperty("os.name").lowercase()
+    when {
+        name.contains("win") -> "windows"
+        name.contains("nix") || name.contains("nux") -> "linux"
+        else -> "mac"
+    }
+}
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.library)
@@ -18,7 +28,19 @@ kotlin {
         val jvmShared by creating { dependsOn(commonMain.get()) }
         jvmMain {
             dependsOn(jvmShared)
-            dependencies { implementation(libs.jlibtorrent.macosx.arm64) }
+            // Desktop native per host OS (jlibtorrent's loader picks lib/<arch>/ by
+            // os.name/os.arch, but each artifact carries exactly one platform binary, so
+            // the host picks which one lands in the app). Packaging is host-OS-bound too —
+            // packageDmg runs on macOS, packageMsi on Windows — so each installer ships
+            // exactly its own native and nothing else. The pure-Java jlibtorrent bindings
+            // come via jvmShared.
+            dependencies {
+                when (hostOs) {
+                    "windows" -> implementation(libs.jlibtorrent.windows)
+                    "linux" -> implementation(libs.jlibtorrent.linux.x8664)
+                    else -> implementation(libs.jlibtorrent.macosx.arm64)
+                }
+            }
         }
         androidMain {
             dependsOn(jvmShared)
@@ -37,7 +59,7 @@ kotlin {
         val jvmSharedTest by creating { dependsOn(commonTest.get()) }
         jvmTest {
             dependsOn(jvmSharedTest)
-            // loopback engine tests stay here (macOS natives)
+            // loopback engine tests stay here (natives come from jvmMain, per host OS)
         }
         androidUnitTest {
             dependsOn(jvmSharedTest)
@@ -46,9 +68,6 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.mockwebserver)
-            // Linux native for the loopback engine tests on CI runners (macOS native
-            // comes via jvmMain; test-only so it never ships in the app artifacts).
-            implementation(libs.jlibtorrent.linux.x8664)
         }
     }
     jvmToolchain(21)

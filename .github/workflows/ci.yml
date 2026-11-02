@@ -1,7 +1,7 @@
 name: ci
 on:
   push: { branches: [main] }
-  pull_request:
+  pull_request
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -13,3 +13,24 @@ jobs:
       - run: >
           ./gradlew :core:jvmTest :cli:build :composeApp:assembleDebug
           :composeApp:testDebugUnitTest :composeApp:jvmTest
+
+  # Windows 11 x64 desktop: same jvm tests with the Windows jlibtorrent native
+  # (host-conditional in core/build.gradle.kts), then package the installers.
+  # WiX for the MSI/EXE is fetched by the compose plugin automatically.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: >
+          ./gradlew.bat :core:jvmTest :cli:build :composeApp:jvmTest
+          :composeApp:packageDistributionForCurrentOS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SurgeMedia-windows-x64
+          path: |
+            composeApp/build/compose/binaries/main/msi/*.msi
+            composeApp/build/compose/binaries/main/exe/*.exe
+          if-no-files-found: error

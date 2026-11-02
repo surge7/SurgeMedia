@@ -86,8 +86,8 @@ object AppContainer {
     /**
      * Download queue: the finalize hook moves a finished torrent's staged files into the
      * active music / video folders (Settings ▸ Storage; built-ins `~/Music/SurgeMedia`
-     * and `~/Movies/SurgeMedia`) via [DesktopFinalizer] (desktop twin of
-     * MediaStoreFinalizer, spec §6 without MediaStore).
+     * and `~/Movies|Videos/SurgeMedia` — macOS `Movies`, Windows/Linux `Videos`) via
+     * [DesktopFinalizer] (desktop twin of MediaStoreFinalizer, spec §6 without MediaStore).
      */
     val downloadManager: DownloadManager by lazy {
         DownloadManager(

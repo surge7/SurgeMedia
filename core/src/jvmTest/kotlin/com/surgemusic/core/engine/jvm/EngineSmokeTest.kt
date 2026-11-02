@@ -17,17 +17,18 @@ import org.junit.Assume.assumeTrue
 class EngineSmokeTest {
 
     /**
-     * Real libtorrent sessions over loopback — hardware/OS-sensitive. macOS runs them
-     * (the shipped desktop platform); Linux CI runners segfault inside the native
-     * session (exit 139), so they are skipped there unless CI_ENGINE_TESTS=1 opts in.
+     * Real libtorrent sessions over loopback — hardware/OS-sensitive. macOS and Windows
+     * run them (the shipped desktop platforms); Linux CI runners segfault inside the
+     * native session (exit 139), so they are skipped there unless CI_ENGINE_TESTS=1
+     * opts in (any platform).
      */
     @BeforeTest
     fun assumeNativeEngineSupported() {
         val osName = System.getProperty("os.name").lowercase()
-        val macOS = osName.contains("mac") || osName.contains("darwin")
+        val shippedDesktop = osName.contains("mac") || osName.contains("darwin") || osName.contains("win")
         assumeTrue(
             "native engine smoke tests skipped on $osName (set CI_ENGINE_TESTS=1 to force)",
-            macOS || System.getenv("CI_ENGINE_TESTS") == "1",
+            shippedDesktop || System.getenv("CI_ENGINE_TESTS") == "1",
         )
     }
 

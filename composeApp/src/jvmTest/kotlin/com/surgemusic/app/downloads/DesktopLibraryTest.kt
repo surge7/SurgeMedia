@@ -1,5 +1,6 @@
 package com.surgemusic.app.downloads
 
+import com.surgemusic.app.VideoLibraryParent
 import com.surgemusic.app.settings.DesktopSettingsStore
 import java.nio.file.Files
 import kotlin.test.AfterTest
@@ -15,6 +16,11 @@ import kotlin.test.assertTrue
  * full control surface: list with per-release aggregation across roots, per-release
  * delete (subtree, and loose files for UNTITLED), delete-all, and the Settings ▸ Storage
  * custom folders (listed under their own root; never swept by delete-all).
+ *
+ * The built-in video parent is platform-dependent (`Movies` on macOS, `Videos` on
+ * Windows/Linux — [VideoLibraryParent]), and label separators follow the host filesystem,
+ * so every expected path goes through [label] / [videoParent] instead of literals — the
+ * suite runs unchanged on macOS dev machines and the Windows CI job.
  */
 class DesktopLibraryTest {
 
@@ -37,6 +43,10 @@ class DesktopLibraryTest {
         home.toFile().deleteRecursively()
     }
 
+    /** The root path as [DesktopLibrary] labels it — home shortened to `~`, host separators. */
+    private fun label(root: String): String =
+        home.resolve(root).toAbsolutePath().toString().replace(home.toString(), "~")
+
     private fun file(root: String, relPath: String, bytes: Int) {
         val f = home.resolve(root).resolve(relPath).toFile()
         f.parentFile.mkdirs()
@@ -47,7 +57,7 @@ class DesktopLibraryTest {
     fun listAggregatesReleasesAcrossRootsWithDetails() = runTest {
         file("Music/SurgeMedia", "Album A/CD1/01.flac", 100)
         file("Music/SurgeMedia", "Album A/CD1/02.flac", 50)
-        file("Movies/SurgeMedia", "Film B/film.mkv", 1000)
+        file("$VideoLibraryParent/SurgeMedia", "Film B/film.mkv", 1000)
         file("Music/SurgeMusic", "Legacy Album/x.mp3", 10) // pre-rebrand root
         file("Music/Unrelated", "other.flac", 999) // outside any root — ignored
 
@@ -55,9 +65,9 @@ class DesktopLibraryTest {
 
         assertEquals(
             listOf(
-                DownloadedRelease("music", "Album A", "~/Music/SurgeMedia", "Music", 2, 150L),
-                DownloadedRelease("movies", "Film B", "~/Movies/SurgeMedia", "Movies", 1, 1000L),
-                DownloadedRelease("music_legacy", "Legacy Album", "~/Music/SurgeMusic (legacy)", "Music", 1, 10L),
+                DownloadedRelease("music", "Album A", label("Music/SurgeMedia"), "Music", 2, 150L),
+                DownloadedRelease("movies", "Film B", label("$VideoLibraryParent/SurgeMedia"), "Movies", 1, 1000L),
+                DownloadedRelease("music_legacy", "Legacy Album", label("Music/SurgeMusic") + " (legacy)", "Music", 1, 10L),
             ),
             releases, // sorted by title: Album A, Film B, Legacy Album
         )
@@ -65,16 +75,16 @@ class DesktopLibraryTest {
 
     @Test
     fun deleteRemovesTheReleaseSubtreeOnly() = runTest {
-        file("Movies/SurgeMedia", "Film B/film.mkv", 1000)
-        file("Movies/SurgeMedia", "Film C/c.mkv", 500)
+        file("$VideoLibraryParent/SurgeMedia", "Film B/film.mkv", 1000)
+        file("$VideoLibraryParent/SurgeMedia", "Film C/c.mkv", 500)
 
         val deleted = library
-            .delete(DownloadedRelease("movies", "Film B", "~/Movies/SurgeMedia", "Movies", 1, 1000L))
+            .delete(DownloadedRelease("movies", "Film B", label("$VideoLibraryParent/SurgeMedia"), "Movies", 1, 1000L))
             .getOrThrow()
 
         assertEquals(1, deleted)
-        assertFalse(home.resolve("Movies/SurgeMedia/Film B").toFile().exists())
-        assertTrue(home.resolve("Movies/SurgeMedia/Film C/c.mkv").toFile().exists())
+        assertFalse(home.resolve("$VideoLibraryParent/SurgeMedia/Film B").toFile().exists())
+        assertTrue(home.resolve("$VideoLibraryParent/SurgeMedia/Film C/c.mkv").toFile().exists())
     }
 
     @Test
@@ -83,7 +93,7 @@ class DesktopLibraryTest {
         file("Music/SurgeMedia", "Album/01.flac", 20)
 
         val deleted = library
-            .delete(DownloadedRelease("music", DownloadedRelease.UNTITLED, "~/Music/SurgeMedia", "Music", 1, 10L))
+            .delete(DownloadedRelease("music", DownloadedRelease.UNTITLED, label("Music/SurgeMedia"), "Music", 1, 10L))
             .getOrThrow()
 
         assertEquals(1, deleted)
@@ -94,7 +104,7 @@ class DesktopLibraryTest {
     @Test
     fun deleteAllSweepsEveryRootIncludingLegacy() = runTest {
         file("Music/SurgeMedia", "Album/01.flac", 10)
-        file("Movies/SurgeMedia", "Film/f.mkv", 20)
+        file("$VideoLibraryParent/SurgeMedia", "Film/f.mkv", 20)
         file("Music/SurgeMusic", "Legacy/x.mp3", 30)
 
         val deleted = library.deleteAll().getOrThrow()
@@ -118,7 +128,7 @@ class DesktopLibraryTest {
             releases.map { it.title },
         )
         // The custom root shows its path (home shortened to ~); the built-in stays for old files.
-        assertEquals("~/" + home.resolve("Tunes").fileName, releases.first { it.title == "New Album" }.locationLabel)
+        assertEquals(label("Tunes"), releases.first { it.title == "New Album" }.locationLabel)
 
         // delete-all sweeps only the app's built-in roots — the custom folder is untouched.
         assertEquals(1, library.deleteAll().getOrThrow())

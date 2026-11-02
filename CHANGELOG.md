@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- **Windows 11 (x64) desktop**: the same Compose Multiplatform app — identical UI,
+  themes, login flow and libtorrent engine — packaged as a per-user MSI + EXE
+  installer (Start-menu shortcuts, app icon, fixed upgrade UUID for clean updates).
+- Native engine wired per platform from one build: each installer ships only its own
+  OS's jlibtorrent native (macOS ARM64 / Windows x64 / Linux x64), selected by the
+  host OS at build time.
+- One-click browser sign-in on Windows: finds Chrome, Edge (preinstalled on
+  Windows 11), Yandex, Brave, Chromium or Opera in `Program Files`,
+  `Program Files (x86)` and `%LOCALAPPDATA%`.
+- Windows window chrome follows the app theme: the caption is painted in the app's
+  own colours via DWM (Windows 11) with a dark-mode flag fallback (Windows 10) —
+  the Windows twin of the macOS title-bar overlay.
+- Default video library on Windows/Linux is `~/Videos/SurgeMedia` (`~/Movies/`
+  stays on macOS); settings labels match.
+- CI gains a Windows job: the JVM test suites run with the Windows native engine,
+  then the MSI/EXE installers are packaged and uploaded as build artifacts.
+
 ## 0.3.0 (2026-10-27)
 
 - New app icon: a cyberpunk "Surge Wave" mark — a neon waveform with a trailing
