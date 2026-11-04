@@ -1,7 +1,6 @@
 package com.surgemusic.core.downloads
 
 import com.surgemusic.core.engine.EngineEvent
-import com.surgemusic.core.engine.EngineSnapshot
 import com.surgemusic.core.engine.TorrentEngine
 import com.surgemusic.core.engine.TorrentFileInfo
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -67,8 +66,6 @@ class FakeEngine : TorrentEngine {
     override fun cancel(id: String) {
         _cancelled.value += id
     }
-
-    override fun snapshot(id: String): EngineSnapshot? = null
 
     override fun listenPort(): Int = 0
 

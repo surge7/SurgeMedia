@@ -15,8 +15,6 @@ import com.frostwire.jlibtorrent.swig.error_code
 import com.frostwire.jlibtorrent.swig.libtorrent
 import com.frostwire.jlibtorrent.swig.tcp_endpoint
 import com.surgemusic.core.engine.EngineEvent
-import com.surgemusic.core.engine.EngineSnapshot
-import com.surgemusic.core.engine.EngineState
 import com.surgemusic.core.engine.TorrentEngine
 import com.surgemusic.core.engine.TorrentFileInfo
 import io.ktor.client.HttpClient
@@ -75,6 +73,16 @@ class JLibTorrentEngine(
     )
 
     private val active = ConcurrentHashMap<String, Active>()
+
+    /**
+     * Serializes {cancel's wantCancelled latch + session sweep} against the find loop's
+     * {wantCancelled re-check + handle adoption}: both check-then-act sequences hold it
+     * across their whole critical section, so a cancel racing the add window can no
+     * longer slip between the loop's latch check and the handle write (that window left
+     * the adopted torrent downloading and emitting events for a cancelled id).
+     */
+    private val adoptionLock = Any()
+
     private val completed: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     /** Errored ids — guards the exactly-once [EngineEvent.Failed] emission in [sampleStatus]. */
@@ -361,27 +369,39 @@ class JLibTorrentEngine(
                 // are v1, so the v1 info-hash is the lookup key (Phase-1 usage).
                 val h = session.find(info.infoHashV1())
                 if (h != null) {
-                    val a = active[id]
-                    if (a == null || a.wantCancelled) {
+                    // Adoption is atomic w.r.t. cancel() via [adoptionLock]: re-check the
+                    // latch under the lock right before writing the handle, so a cancel
+                    // landing mid-adoption either precedes the check (abort path below)
+                    // or finds the handle already set (direct remove) — never the
+                    // in-between that used to leave a cancelled torrent downloading.
+                    val cancelled = synchronized(adoptionLock) {
+                        val a = active[id]
+                        if (a == null || a.wantCancelled) {
+                            true
+                        } else {
+                            a.handle = h
+                            // Add-window latches: a [setWantedFiles] that landed while the handle
+                            // was still missing re-points the fresh selection first, then a latched
+                            // pause applies (mirrors the caller issuing addFiles/pause right after
+                            // start()). pendingWanted arms the same stale-finished guard as the live
+                            // [setWantedFiles] path, and clears Completed so the enlarged selection
+                            // can fire a fresh one.
+                            a.pendingWanted?.let {
+                                completed.remove(id)
+                                applyPriorities(h, info, it)
+                                pendingWanted[id] = System.currentTimeMillis()
+                            }
+                            if (a.wantPaused) runCatching { h.pause() }
+                            false
+                        }
+                    }
+                    if (cancelled) {
                         // cancel() latched during the add window: drop the just-adopted
                         // torrent silently — no events for a cancelled id.
                         runCatching { session.remove(h) }
                         active.remove(id)
                         return@launch
                     }
-                    a.handle = h
-                    // Add-window latches: a [setWantedFiles] that landed while the handle
-                    // was still missing re-points the fresh selection first, then a latched
-                    // pause applies (mirrors the caller issuing addFiles/pause right after
-                    // start()). pendingWanted arms the same stale-finished guard as the live
-                    // [setWantedFiles] path, and clears Completed so the enlarged selection
-                    // can fire a fresh one.
-                    a.pendingWanted?.let {
-                        completed.remove(id)
-                        applyPriorities(h, info, it)
-                        pendingWanted[id] = System.currentTimeMillis()
-                    }
-                    if (a.wantPaused) runCatching { h.pause() }
                     _events.tryEmit(EngineEvent.Added(id))
                     extraPeers.forEach { (ip, port) -> addPeer(h, ip, port) }
                     announceTrackers(id, info, h)
@@ -477,41 +497,30 @@ class JLibTorrentEngine(
 
     /**
      * Cancels [id]. In the add window (handle not yet adopted) the entry is KEPT with
-     * `wantCancelled` latched — the find loop in [start] drops it (session.remove, no
-     * events) when it adopts the handle; before that latch existed, a cancel racing the
-     * add window left the entry behind: the adopted torrent kept downloading and kept
-     * emitting events for a cancelled id.
+     * `wantCancelled` latched and — under [adoptionLock], the lock the find loop in
+     * [start] adopts under — any torrent already sitting in the session for this id is
+     * removed immediately: the session thread may have added it while the find loop has
+     * not adopted the handle yet, and removing it here (instead of waiting for the loop)
+     * tears the torrent down at cancel time. The loop's abort path re-fires a harmless
+     * idempotent remove if it still finds one; before that latch existed, a cancel
+     * racing the add window left the entry behind: the adopted torrent kept downloading
+     * and kept emitting events for a cancelled id.
      */
     override fun cancel(id: String) {
         announceJobs.remove(id)?.cancel()
         pendingWanted.remove(id)
-        val a = active[id] ?: return
-        val handle = a.handle
-        if (handle == null) {
-            a.wantCancelled = true
-            return
+        synchronized(adoptionLock) {
+            val a = active[id] ?: return
+            val handle = a.handle
+            if (handle == null) {
+                a.wantCancelled = true
+                val stray = runCatching { session.find(a.info.infoHashV1()) }.getOrNull()
+                if (stray != null) runCatching { session.remove(stray) }
+                return
+            }
+            active.remove(id)
+            runCatching { session.remove(handle) }
         }
-        active.remove(id)
-        runCatching { session.remove(handle) }
-    }
-
-    override fun snapshot(id: String): EngineSnapshot? {
-        val h = active[id]?.handle ?: return null
-        return runCatching {
-            val st = h.status()
-            EngineSnapshot(
-                id = id,
-                state = when {
-                    isFinished(st) -> EngineState.DONE
-                    isPaused(st) -> EngineState.PAUSED
-                    else -> EngineState.DOWNLOADING
-                },
-                bytesDone = st.totalWantedDone(),
-                bytesTotal = st.totalWanted(),
-                downloadSpeed = st.downloadPayloadRate().toLong(),
-                peers = st.numPeers(),
-            )
-        }.getOrNull()
     }
 
     override fun close() {

@@ -2,14 +2,6 @@ package com.surgemusic.core.engine
 
 import kotlinx.coroutines.flow.SharedFlow
 
-enum class EngineState { DOWNLOADING, PAUSED, DONE, FAILED }
-
-data class EngineSnapshot(
-    val id: String, val state: EngineState,
-    val bytesDone: Long, val bytesTotal: Long,
-    val downloadSpeed: Long, val peers: Int,
-)
-
 sealed interface EngineEvent {
     data class Added(val id: String) : EngineEvent
     data class Progress(val id: String, val bytesDone: Long, val bytesTotal: Long, val downloadSpeed: Long, val peers: Int) : EngineEvent
@@ -58,6 +50,5 @@ interface TorrentEngine : AutoCloseable {
     fun setWantedFiles(id: String, wantedFiles: Set<Int>)
 
     val events: SharedFlow<EngineEvent>
-    fun snapshot(id: String): EngineSnapshot?
     fun listenPort(): Int
 }

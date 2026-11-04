@@ -77,6 +77,16 @@ class DownloadManager(
     /** engine.start arguments per id — kept out of the public [DownloadItem]. */
     private val staged = MutableStateFlow<Map<String, StagedStart>>(emptyMap())
 
+    /**
+     * Per-id generation, bumped whenever a new round takes over an existing id — a
+     * re-enqueue of a terminal item and addFiles' DONE-restart. The DONE teardown
+     * captures the generation while the item is still FINALIZING (no bump path can run
+     * against a non-terminal id) and cancels only when it is unchanged at teardown time:
+     * without it the fire-and-forget teardown of a finished round could land after a
+     * restart re-adopted the id and kill the fresh engine.start.
+     */
+    private val generations = MutableStateFlow<Map<String, Int>>(emptyMap())
+
     private val activeStates =
         setOf(DownloadState.QUEUED, DownloadState.DOWNLOADING, DownloadState.PAUSED)
 
@@ -155,6 +165,7 @@ class DownloadManager(
             it + (request.id to StagedStart(torrentBytes, stagingDir, wantedFileIndices, files))
         }
         var changed = false
+        var reEnqueued = false
         _items.update { list ->
             // Re-check inside the atomic update: the pre-check above runs on a snapshot,
             // so two concurrent same-id enqueues could both pass it and both append.
@@ -162,12 +173,18 @@ class DownloadManager(
             if (current != null && current.state !in terminalStates) return@update list
             changed = true
             if (current != null) {
+                reEnqueued = true
                 list.map { if (it.request.id == request.id) DownloadItem(request) else it }
             } else {
                 list + DownloadItem(request)
             }
         }
-        if (changed) persistQueue()
+        if (changed) {
+            // the reset starts a new round for the id — bump before the pump's
+            // engine.start so a pending DONE teardown of the previous round skips it
+            if (reEnqueued) bumpGeneration(request.id)
+            persistQueue()
+        }
         pump()
     }
 
@@ -261,6 +278,9 @@ class DownloadManager(
                     if (_items.value.none { it.request.id == id }) staged.update { it - id }
                     return false
                 }
+                // the restart is a new round for the id — bump before the pump's
+                // engine.start so the previous round's pending DONE teardown skips it
+                bumpGeneration(id)
                 pump()
                 persistQueue()
                 true
@@ -436,12 +456,18 @@ class DownloadManager(
                         val result = finalize(snapshot, stagingDir)
                         when {
                             result.isSuccess -> {
+                                // Capture the generation while the item is FINALIZING: no
+                                // bump path (enqueue reset / addFiles restart) can run
+                                // against a non-terminal id, so this is unambiguously the
+                                // generation at DONE time — a round taking the id over
+                                // after the flip must not be cancelled by the teardown.
+                                val generation = generations.value[id]
                                 val done =
                                     mutateIf(id, guard = { it.state == DownloadState.FINALIZING }) {
                                         it.copy(state = DownloadState.DONE, outputNote = result.getOrNull())
                                     }
                                 if (done) {
-                                    scope.launch { teardownEngine(id) }
+                                    scope.launch { teardownEngine(id, generation) }
                                     persistQueue()
                                 }
                             }
@@ -477,14 +503,19 @@ class DownloadManager(
     /**
      * Fire-and-forget engine teardown of a terminal item's torrent — the handle is dead
      * weight (piece cache, announce timer) once the payload is finalized or abandoned.
-     * The id may have been re-taken meanwhile (retry enqueue / addFiles' DONE-restart),
-     * so cancel only while the item is still terminal: engine.start removes any prior
-     * torrent with the id, so cancel-before-start is harmless, but cancel-after-start
-     * would kill the fresh round.
+     * The id may have been re-taken meanwhile (retry enqueue / addFiles' DONE-restart);
+     * both bump [generations], so cancel only while the item is still terminal AND
+     * [generation] — captured at DONE time — is unchanged: a mismatch means a fresh
+     * round owns the id and its engine.start must not be cancelled.
      */
-    private fun teardownEngine(id: String) {
+    private fun teardownEngine(id: String, generation: Int?) {
         val state = _items.value.firstOrNull { it.request.id == id }?.state ?: return
-        if (state in terminalStates) engine.cancel(id)
+        if (state in terminalStates && generations.value[id] == generation) engine.cancel(id)
+    }
+
+    /** Bumps [id]'s generation — a new round took over the id (see [generations]). */
+    private fun bumpGeneration(id: String) {
+        generations.update { it + (id to ((it[id] ?: 0) + 1)) }
     }
 
     /** Non-terminal items with their staged start; terminal items need no resume. */

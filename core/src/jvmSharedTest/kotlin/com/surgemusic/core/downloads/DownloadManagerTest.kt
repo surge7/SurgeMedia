@@ -1,12 +1,14 @@
 package com.surgemusic.core.downloads
 
 import com.surgemusic.core.engine.EngineEvent
+import com.surgemusic.core.engine.TorrentEngine
 import com.surgemusic.core.engine.TorrentFileInfo
 import kotlin.io.encoding.Base64
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
@@ -484,6 +486,40 @@ class DownloadManagerTest {
         assertEquals(1, engine.started.value.size)
     }
 
+    // ── DONE teardown vs restart (per-id generation) ─────────────────────────────────
+
+    @Test
+    fun teardownSkipsRestartedItem() = runBlocking {
+        val fake = FakeEngine().apply { files = fourFiles }
+        val engine = OrderingEngine(fake)
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
+        fake.awaitSubscribed()
+        manager.enqueue(request("t-1", sizeBytes = 100), torrent, "/staging/t-1", wantedFileIndices = setOf(0))
+        awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+        assertTrue(fake.events.tryEmit(EngineEvent.Completed("t-1")))
+        awaitItem(manager, "t-1") { it.state == DownloadState.DONE }
+
+        // Restart while the previous round's fire-and-forget DONE teardown is still in
+        // flight: the restart bumps the id's generation, so the stale teardown must not
+        // fire engine.cancel for the id anymore — a cancel landing after the fresh
+        // engine.start would kill the restarted round. (The teardown may legitimately
+        // cancel BEFORE the restart — that ordering is fine and not asserted against.)
+        assertTrue(manager.addFiles("t-1", setOf(1, 2)))
+        awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+        withTimeout(5_000) { while (fake.started.value.size < 2) delay(10) }
+        delay(250) // settle: a wrongly-issued teardown cancel would have landed by now
+
+        val log = engine.log
+        val restartAt = log.lastIndexOf("start:t-1")
+        assertTrue(restartAt >= 0, "the restarted round must run: $log")
+        assertTrue(
+            log.drop(restartAt + 1).none { it == "cancel:t-1" },
+            "stale DONE teardown must not cancel the restarted id: $log",
+        )
+        assertEquals(setOf(1, 2), fake.started.value[1].wantedFiles)
+        assertEquals(DownloadState.DOWNLOADING, item(manager, "t-1").state)
+    }
+
     // ── Queue persistence (crash/exit recovery) ──────────────────────────────────────
 
     @Test
@@ -569,3 +605,25 @@ private class FakeQueuePersistence(
 }
 
 private fun List<PersistedDownload>.containsPersisted(id: String): Boolean = any { it.id == id }
+
+/**
+ * [FakeEngine] wrapper logging start/cancel chronologically — FakeEngine's per-call
+ * lists cannot express call ORDER, which order-sensitive tests (e.g. "the stale DONE
+ * teardown must not cancel after a restart's start") need. Everything else delegates.
+ */
+private class OrderingEngine(private val fake: FakeEngine) : TorrentEngine by fake {
+    private val logFlow = MutableStateFlow<List<String>>(emptyList())
+
+    /** Engine start/cancel calls as "start:<id>" / "cancel:<id>", in call order. */
+    val log: List<String> get() = logFlow.value
+
+    override fun start(id: String, torrentBytes: ByteArray, targetDir: String, wantedFiles: Set<Int>) {
+        logFlow.update { it + "start:$id" }
+        fake.start(id, torrentBytes, targetDir, wantedFiles)
+    }
+
+    override fun cancel(id: String) {
+        logFlow.update { it + "cancel:$id" }
+        fake.cancel(id)
+    }
+}
