@@ -419,7 +419,7 @@ object RuStrings : AppStrings {
     override val validate = "Проверить"
     override val validationOk = "Сессия в порядке — пробный поиск прошёл успешно."
     override fun sessionCheckFailed(detail: String) = "Проверка сессии не удалась: $detail"
-    override val importFailedEmptyCookie = "Импорт не удалён: заголовок Cookie пуст."
+    override val importFailedEmptyCookie = "Импорт не удался: заголовок Cookie пуст."
     override val appearanceHeader = "Оформление"
     override val themeCaption = "Тема — «Системная» следует настройке тёмной темы устройства."
     override val themeSystem = "Системная"

@@ -6,6 +6,7 @@ import com.surgemusic.core.tracker.TrackerError
 import com.surgemusic.core.tracker.TrackerErrorKind
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -100,6 +101,16 @@ class SearchViewModel(
     /** Start offset for the next loadMore; grows with each successful page. */
     private var nextStart: Int = 0
 
+    /**
+     * The query the current/last search actually ran against. Pagination and retry stay
+     * pinned to it, so editing the field text without pressing Search again never makes
+     * load-more fetch pages of a foreign query.
+     */
+    private var currentSearchQuery: String = ""
+
+    /** In-flight fetch (search or load-more); a new search cancels it so stale results never land. */
+    private var searchJob: Job? = null
+
     private enum class Pending { NONE, SEARCH, LOAD_MORE }
 
     private var pending: Pending = Pending.NONE
@@ -115,10 +126,18 @@ class SearchViewModel(
 
     fun search() {
         val q = _query.value.trim()
-        if (q.isEmpty() || _uiState.value is SearchUiState.Loading) return
+        if (q.isEmpty()) return
+        currentSearchQuery = q
+        startSearch(q)
+    }
+
+    private fun startSearch(q: String) {
+        // Cancel-and-restart: a search started mid-flight (IME Search re-press) must not
+        // leave the stale query's completion free to overwrite the fresh one's results.
+        searchJob?.cancel()
         pending = Pending.SEARCH
         _uiState.value = SearchUiState.Loading
-        scope.launch {
+        searchJob = scope.launch {
             searchFn(q, 0).fold(
                 onSuccess = { page ->
                     _results.value = page.rows
@@ -134,7 +153,7 @@ class SearchViewModel(
 
     fun retry() {
         when (pending) {
-            Pending.SEARCH -> search()
+            Pending.SEARCH -> if (currentSearchQuery.isNotEmpty()) startSearch(currentSearchQuery)
             Pending.LOAD_MORE -> loadMoreInternal(force = true) // bypass the Ready-only guard after a failure
             Pending.NONE -> Unit
         }
@@ -147,14 +166,17 @@ class SearchViewModel(
             val ready = state as? SearchUiState.Ready ?: return
             if (!ready.hasMore) return
         }
-        val q = _query.value.trim()
+        val q = currentSearchQuery
         if (q.isEmpty()) return
         pending = Pending.LOAD_MORE
         _uiState.value = SearchUiState.Loading
-        scope.launch {
+        searchJob = scope.launch {
             searchFn(q, nextStart).fold(
                 onSuccess = { page ->
-                    _results.value = _results.value + page.rows
+                    // Pages occasionally re-serve rows already loaded; LazyColumn keys rows by
+                    // topicId, so a duplicate would crash recomposition — append only unseen ones.
+                    val known = _results.value.mapTo(mutableSetOf()) { it.topicId }
+                    _results.value = _results.value + page.rows.filter { it.topicId !in known }
                     nextStart = page.start + page.rows.size
                     _uiState.value = SearchUiState.Ready(hasMore = page.rows.isNotEmpty())
                 },

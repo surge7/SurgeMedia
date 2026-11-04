@@ -144,6 +144,12 @@ class DownloadsViewModel(
 /** Centered content cap for wide windows — beyond this the card grid just widens margins. */
 private val MaxContentWidth = 1080.dp
 
+/** Localized text for the transient result banner (delete succeeded / failed). */
+private fun bannerText(msg: DownloadsMessage, strings: AppStrings): String = when (msg) {
+    is DownloadsMessage.DeletedFiles -> strings.deletedFiles(msg.count)
+    is DownloadsMessage.DeleteFailed -> strings.deleteFailed(msg.detail)
+}
+
 /**
  * Downloads tab (plan Task 8): one card per queue item — title, forum, progress bar,
  * status chip, speed + peers while downloading, Pause/Resume toggle and Cancel;
@@ -161,35 +167,45 @@ fun DownloadsScreen(
     modifier: Modifier = Modifier,
 ) {
     val items by viewModel.items.collectAsState()
+    // Collected before the empty-state early return so the result banner ("Deleted N files")
+    // stays visible even when a delete emptied the list — previously the banner died with it.
+    val message by viewModel.message.collectAsState()
     val strings = LocalStrings.current
 
     if (items.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            SurgePanel(modifier = Modifier.padding(24.dp)) {
-                Column(
-                    modifier = Modifier.padding(8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Download,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(48.dp),
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                message?.let { msg ->
+                    SurgeResultBanner(
+                        text = bannerText(msg, strings),
+                        onDismiss = viewModel::consumeMessage,
                     )
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = strings.emptyDownloads,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
+                }
+                SurgePanel(modifier = Modifier.padding(24.dp)) {
+                    Column(
+                        modifier = Modifier.padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Download,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(48.dp),
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            text = strings.emptyDownloads,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             }
         }
         return
     }
 
-    val message by viewModel.message.collectAsState()
     var pendingDeleteItem by remember { mutableStateOf<DownloadItem?>(null) }
     var pendingAddItem by remember { mutableStateOf<DownloadItem?>(null) }
     var showDeleteAll by remember { mutableStateOf(false) }
@@ -198,10 +214,7 @@ fun DownloadsScreen(
         Column(modifier = Modifier.fillMaxSize().widthIn(max = MaxContentWidth)) {
             message?.let { msg ->
                 SurgeResultBanner(
-                    text = when (msg) {
-                        is DownloadsMessage.DeletedFiles -> strings.deletedFiles(msg.count)
-                        is DownloadsMessage.DeleteFailed -> strings.deleteFailed(msg.detail)
-                    },
+                    text = bannerText(msg, strings),
                     onDismiss = viewModel::consumeMessage,
                 )
             }

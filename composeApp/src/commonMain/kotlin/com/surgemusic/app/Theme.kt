@@ -12,10 +12,10 @@ import com.surgemusic.app.ui.theme.SurgeTypography
  * Theme preference (Settings ▸ Appearance): follow the OS, or force the dark / light
  * Surge Media scheme. Persisted as `theme_mode` by both platform settings stores.
  */
-enum class ThemeMode(val label: String) {
-    SYSTEM("System"),
-    LIGHT("Light"),
-    DARK("Dark"),
+enum class ThemeMode {
+    SYSTEM,
+    LIGHT,
+    DARK,
 }
 
 /** Parse a persisted [ThemeMode] name; anything unknown (or null) falls back to [ThemeMode.SYSTEM]. */
