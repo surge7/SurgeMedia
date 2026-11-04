@@ -73,6 +73,28 @@ class DownloadService : Service() {
         return START_STICKY
     }
 
+    /**
+     * Android 15 (API 35) enforces a 6-hours-per-24 window quota on `dataSync` foreground
+     * services and calls [onTimeout] when it is exhausted — without an override the system
+     * force-stops the app (ANR-equivalent). Pause everything (same handling as
+     * ACTION_PAUSE_ALL; queue items keep their PAUSED state), drop the notification and
+     * stop before the system escalates. API 36 additionally dispatches the two-arg
+     * overload — one shared body so exactly one of them runs per timeout on every level.
+     */
+    override fun onTimeout(startId: Int) {
+        handleTimeout()
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        handleTimeout()
+    }
+
+    private fun handleTimeout() {
+        scope.launch { AppContainer.downloadManager.pauseAll() }
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()

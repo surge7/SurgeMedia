@@ -29,6 +29,7 @@ import com.surgemusic.core.model.SearchResultRow
 import com.surgemusic.core.tracker.jvm.RutrackerClient
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CompletableDeferred
 
 /**
  * Manual DI: lazy singletons shared by all screens.
@@ -99,6 +100,16 @@ object AppContainer {
      */
     @Volatile
     var folderPicker: (suspend (isVideo: Boolean) -> String?)? = null
+
+    /**
+     * Pending pick parked by [folderPicker] and completed by MainActivity's
+     * ActivityResultLauncher callback (tree URI string, or null when the user abandons
+     * the picker). Lives on this process singleton, NOT the activity, so a configuration
+     * change / recreation while the system chooser is showing can't drop the awaiting
+     * coroutine — the recreated activity's launcher still resolves the same deferred.
+     */
+    @Volatile
+    var folderPickDeferred: CompletableDeferred<String?>? = null
 
     /**
      * Download queue (Task 8 wiring): the finalize hook moves a finished torrent's staged
