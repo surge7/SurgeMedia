@@ -3,6 +3,7 @@ package com.surgemusic.app
 import com.surgemusic.app.downloads.DesktopFileCleaner
 import com.surgemusic.app.downloads.DesktopFinalizer
 import com.surgemusic.app.downloads.DesktopQueuePersistence
+import com.surgemusic.app.locale.DesktopLocaleMonitor
 import com.surgemusic.app.session.FileSessionStore
 import com.surgemusic.app.session.SessionRepository
 import com.surgemusic.app.session.SessionVaults
@@ -23,6 +24,8 @@ import com.surgemusic.core.model.SearchResultRow
 import com.surgemusic.core.tracker.jvm.RutrackerClient
 import java.nio.file.Path
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 
 /**
@@ -36,7 +39,7 @@ import kotlinx.coroutines.withContext
  * while the app does, and nothing starts a foreground notification. `wifiOnly` stays
  * editable in Settings but is not enforced on desktop.
  */
-object AppContainer {
+actual object AppContainer {
     val engine: TorrentEngine by lazy { JLibTorrentEngine() }
 
     /**
@@ -48,6 +51,24 @@ object AppContainer {
 
     /** Properties-backed StateFlows (Task 6; android uses SettingsStore over SharedPreferences). */
     val settings: DesktopSettingsStore by lazy { DesktopSettingsStore() }
+
+    /** Backing tick for [localeTick]; bumped by [localeMonitor] on an OS-language change. */
+    private val localeTickState = MutableStateFlow(0)
+
+    /** OS-language-change tick (see the commonMain expect declaration). */
+    actual val localeTick: StateFlow<Int> get() = localeTickState
+
+    /**
+     * OS-language watcher feeding [localeTick]: started at desktop startup (Main.kt) and
+     * stopped from its shutdown hook — the container just hosts the pair.
+     */
+    private val localeMonitor by lazy { DesktopLocaleMonitor(localeTickState) }
+
+    /** Starts the OS-language poll loop (desktop startup; see [DesktopLocaleMonitor]). */
+    fun startLocaleMonitor() = localeMonitor.start()
+
+    /** Stops the OS-language poll loop (shutdown hook — no exit path leaks it). */
+    fun stopLocaleMonitor() = localeMonitor.stop()
 
     private val clientLock = Any()
 

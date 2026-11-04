@@ -155,8 +155,11 @@ fun App(
     val scope = rememberCoroutineScope()
 
     // Active strings: forced English/Russian, or SYSTEM following the OS locale. Read on
-    // every language change so the whole shell re-resolves without a restart.
-    val strings = remember(language) { stringsFor(language, systemLanguageIsRussian()) }
+    // every language change so the whole shell re-resolves without a restart. The tick
+    // bumps whenever the OS language moves (desktop: DesktopLocaleMonitor polls every 10s;
+    // static 0 on android) so SYSTEM follows the OS live — no app restart needed.
+    val localeTick by AppContainer.localeTick.collectAsState()
+    val strings = remember(language, localeTick) { stringsFor(language, systemLanguageIsRussian()) }
 
     // Sticky retry: the snackbar with "Retry" can outlive the initial attempt. The
     // download functions capture the row current at launch, and every completion checks
