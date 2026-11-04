@@ -103,11 +103,12 @@ internal object MediaFiles {
     }
 
     /**
-     * Album-dir name from a torrent title: filesystem/MediaStore-illegal characters
-     * become `_`. Shared by the finalizer (where files land) and `MediaStoreCleaner`
-     * (which must match the exact same dir to delete them).
+     * Album-dir name from a torrent title — delegates to the shared
+     * [sanitizeAlbumName] (illegal characters become `_`, 120-char cap, degenerate
+     * names → "untitled"). Shared by the finalizer (where files land) and
+     * `MediaStoreCleaner` (which must match the exact same dir to delete them).
      */
-    internal fun sanitizeDirName(title: String): String = title.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
+    internal fun sanitizeDirName(title: String): String = sanitizeAlbumName(title)
 
     /**
      * MediaStore [MediaStore.MediaColumns.RELATIVE_PATH] for the given collection kind.
@@ -129,7 +130,8 @@ internal object MediaFiles {
 /**
  * Moves a finished torrent's staged files into the user's media libraries (spec §6)
  * with per-file isolation: media files only, one rejected file cannot fail the batch,
- * staging tree deleted afterwards, all-skipped batch fails with the skipped list.
+ * staging tree deleted only once every file succeeded (a failed file stays in staging
+ * for retry salvage), all-skipped batch fails with the per-file causes.
  *
  * Destination per kind (Settings ▸ Storage): a custom folder wins when set — if its SAF
  * tree maps onto a MediaStore standard root ("primary:Music/MyMusic" → RELATIVE_PATH
@@ -140,7 +142,8 @@ internal object MediaFiles {
  * the default `Pictures/SurgeMedia/` collection (MediaStore restricts images to
  * Pictures/DCIM/Download roots). Defaults without a custom folder are unchanged:
  * `Music/SurgeMedia/…`, `Movies/SurgeMedia/…` via MediaStore inserts with
- * `IS_PENDING=1` → stream copy → `IS_PENDING=0`, so MediaScanner picks each file up.
+ * `IS_PENDING=1` → stream copy → `IS_PENDING=0`, so MediaScanner picks each file up
+ * (a failure before publish deletes the pending row — no invisible 7-day leftovers).
  * Runs off the main thread; any failure surfaces as `Result.failure`.
  */
 class MediaStoreFinalizer(
@@ -182,10 +185,10 @@ class MediaStoreFinalizer(
             runCatching {
                 val root = File(stagingDir) // …/staging/<topicId>/<torrentName>/files…
                 val torrentDir = root.listFiles()?.firstOrNull { it.isDirectory } ?: root
-                val albumDir = sanitize(item.request.title).take(120)
+                val albumDir = sanitizeAlbumName(item.request.title)
                 val destByKind = HashMap<String, Dest>()
                 var copied = 0
-                val failedFiles = mutableListOf<String>()
+                val failedFiles = mutableListOf<String>() // "name: cause" details
                 val rootsWritten = linkedSetOf<String>() // destinations files actually landed in
                 torrentDir
                     .walkTopDown()
@@ -199,17 +202,22 @@ class MediaStoreFinalizer(
                         val sub = f.parentFile?.toRelativeString(torrentDir).orEmpty()
                         // Per-file isolation: one rejected file (e.g. an unsupported
                         // path/mime combination) must not fail the whole batch.
-                        val ok = runCatching {
+                        val outcome = runCatching {
                             when (dest) {
                                 is Dest.Store -> copyViaMediaStore(f, kind, mime, dest.prefix, albumDir, sub)
                                 is Dest.Tree -> copyIntoTree(f, mime, dest.treeUri, albumDir, sub)
                             }?.also { rootsWritten += it }
                                 ?: error("finalize returned null for ${f.name}")
-                        }.isSuccess
-                        if (ok) copied++ else failedFiles.add(f.name)
+                        }
+                        if (outcome.isSuccess) copied++ else failedFiles.add(describeFailure(f, outcome))
                     }
-                root.deleteRecursively()
-                require(copied > 0) { "no files finalized${if (failedFiles.isNotEmpty()) "; failed: $failedFiles" else ""}" }
+                // Establish success BEFORE touching staging: deleting first would destroy
+                // fully-downloaded data on a volume-full / permission failure. Files that
+                // failed environmentally stay in staging for a retry to salvage.
+                require(copied > 0) {
+                    "no files finalized${if (failedFiles.isNotEmpty()) "; failed: $failedFiles" else ""}"
+                }
+                if (failedFiles.isEmpty()) root.deleteRecursively()
                 buildString {
                     append(
                         "$copied files → " +
@@ -220,7 +228,11 @@ class MediaStoreFinalizer(
             }
         }
 
-    /** MediaStore insert (IS_PENDING → copy → publish); returns the destination label. */
+    /**
+     * MediaStore insert (IS_PENDING → copy → publish); returns the destination label.
+     * A failure anywhere between insert and publish deletes the inserted row — an
+     * abandoned pending row is invisible to every app and only expires after 7 days.
+     */
     private fun copyViaMediaStore(
         file: File,
         kind: String,
@@ -246,12 +258,25 @@ class MediaStoreFinalizer(
         }
         val uri = context.contentResolver.insert(collection, values)
             ?: error("insert returned null for ${file.name}")
-        context.contentResolver.openOutputStream(uri)!!.use { out ->
-            file.inputStream().use { it.copyTo(out) }
+        try {
+            context.contentResolver.openOutputStream(uri)!!.use { out ->
+                file.inputStream().use { it.copyTo(out) }
+            }
+            val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+            context.contentResolver.update(uri, done, null, null)
+        } catch (e: Exception) {
+            // Roll the pending row back (best-effort — the storage failure that got us
+            // here may also break the delete); the original error still fails this file.
+            runCatching { context.contentResolver.delete(uri, null, null) }
+            throw e
         }
-        val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
-        context.contentResolver.update(uri, done, null, null)
         return prefix.trimEnd('/')
+    }
+
+    /** Per-file failure detail for the failure/note message: `"track.flac: <cause>"`. */
+    private fun describeFailure(file: File, outcome: Result<*>): String {
+        val cause = outcome.exceptionOrNull()
+        return "${file.name}: ${cause?.message ?: cause?.javaClass?.simpleName ?: "unknown error"}"
     }
 
     /**
@@ -275,6 +300,4 @@ class MediaStoreFinalizer(
         } ?: return null
         return MediaFiles.treeDocumentIdOf(treeUri.toString())
     }
-
-    private fun sanitize(s: String) = MediaFiles.sanitizeDirName(s)
 }
