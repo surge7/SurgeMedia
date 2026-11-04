@@ -5,6 +5,7 @@ import com.surgemusic.app.downloads.DesktopFinalizer
 import com.surgemusic.app.downloads.DesktopQueuePersistence
 import com.surgemusic.app.session.FileSessionStore
 import com.surgemusic.app.session.SessionRepository
+import com.surgemusic.app.session.SessionVaults
 import com.surgemusic.app.settings.DesktopSettingsStore
 import com.surgemusic.app.settings.DirectoryPicker
 import com.surgemusic.app.downloads.DesktopLibrary
@@ -38,8 +39,12 @@ import kotlinx.coroutines.withContext
 object AppContainer {
     val engine: TorrentEngine by lazy { JLibTorrentEngine() }
 
-    /** Plain-file session persistence (Task 6; android uses KeystoreSessionStore). */
-    val sessionStore: SessionRepository by lazy { FileSessionStore() }
+    /**
+     * Session persistence (Task 6; android uses KeystoreSessionStore): OS credential vault
+     * when the host has one (DPAPI / Keychain / secret-tool), 0600 plaintext file as the
+     * fallback — see [FileSessionStore].
+     */
+    val sessionStore: SessionRepository by lazy { FileSessionStore(vault = SessionVaults.create()) }
 
     /** Properties-backed StateFlows (Task 6; android uses SettingsStore over SharedPreferences). */
     val settings: DesktopSettingsStore by lazy { DesktopSettingsStore() }

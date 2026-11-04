@@ -38,10 +38,11 @@ kotlin {
             // over OkHttp's WebSocket; core exposes ktor/okhttp only as implementation.
             implementation(libs.okhttp)
             implementation(libs.kotlinx.serialization.json)
-            // Windows-only DWM caption theming (WindowsWindowChrome); the library loads
-            // lazily and is never touched on macOS/Linux. Desktop-only so the Android
-            // APK never carries it.
+            // Windows-only DWM caption theming (WindowsWindowChrome) + DPAPI session vault
+            // (Crypt32Util, SessionVault); the libraries load lazily and are never touched
+            // on macOS/Linux. Desktop-only so the Android APK never carries them.
             implementation(libs.jna)
+            implementation(libs.jna.platform)
         }
         jvmMain {
             dependsOn(desktopMain)
