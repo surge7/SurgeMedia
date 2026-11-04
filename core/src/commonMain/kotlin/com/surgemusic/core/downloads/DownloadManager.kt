@@ -83,9 +83,26 @@ class DownloadManager(
      * captures the generation while the item is still FINALIZING (no bump path can run
      * against a non-terminal id) and cancels only when it is unchanged at teardown time:
      * without it the fire-and-forget teardown of a finished round could land after a
-     * restart re-adopted the id and kill the fresh engine.start.
+     * restart re-adopted the id and kill the fresh engine.start. Together with the
+     * per-id start/teardown mutex (see [idLocks]) the check-then-cancel window is fully
+     * closed.
      */
     private val generations = MutableStateFlow<Map<String, Int>>(emptyMap())
+
+    /**
+     * Per-id mutexes serializing an id's engine.start against its fire-and-forget DONE
+     * teardown, created on demand and kept forever (bounded by distinct ids). Lock
+     * hierarchy: manager state writes are non-suspending CAS updates that never touch
+     * this lock — it is acquired only after the relevant state update commits, never
+     * inside an update lambda — and [teardownEngine] holds the only suspending
+     * acquisition ([Mutex.withLock]); the pump takes it non-suspending via
+     * [Mutex.tryLock]. Held by exactly the same-id start/teardown paths — the pump's
+     * claim-and-start (which is also how the addFiles DONE-restart's engine.start runs)
+     * and [teardownEngine]'s re-check-and-cancel — so for one id a stale teardown
+     * either cancels the dead torrent strictly before the fresh start, or re-checks
+     * under the lock and skips.
+     */
+    private val idLocks = MutableStateFlow<Map<String, Mutex>>(emptyMap())
 
     private val activeStates =
         setOf(DownloadState.QUEUED, DownloadState.DOWNLOADING, DownloadState.PAUSED)
@@ -279,7 +296,9 @@ class DownloadManager(
                     return false
                 }
                 // the restart is a new round for the id — bump before the pump's
-                // engine.start so the previous round's pending DONE teardown skips it
+                // engine.start so the previous round's pending DONE teardown skips it;
+                // that start serializes against the teardown on the id's mutex inside
+                // the pump, so the teardown can never cancel the fresh round
                 bumpGeneration(id)
                 pump()
                 persistQueue()
@@ -411,19 +430,34 @@ class DownloadManager(
                 skipped += next.request.id
                 continue
             }
-            val claimed =
-                mutateIf(next.request.id, guard = { it.state == DownloadState.QUEUED }) {
-                    it.copy(state = DownloadState.DOWNLOADING)
+            // claim-and-start under the id's mutex: a fire-and-forget DONE teardown for
+            // this id either cancels the previous round's dead torrent strictly before
+            // this start, or re-checks under the lock and skips — a stale cancel can no
+            // longer land after (and kill) this fresh start. A busy lock means such a
+            // teardown (or another start of the id) is mid-flight; retry via the pump
+            // backstop instead of suspending (the pump stays non-suspending).
+            val idLock = lockFor(next.request.id)
+            if (!idLock.tryLock()) {
+                scope.launch { runPump() }
+                return
+            }
+            try {
+                val claimed =
+                    mutateIf(next.request.id, guard = { it.state == DownloadState.QUEUED }) {
+                        it.copy(state = DownloadState.DOWNLOADING)
+                    }
+                if (claimed) {
+                    // start() only schedules work on the engine's own IO scope (no caller-thread
+                    // blocking), and a synchronous throw (fake/real engine rejecting the args)
+                    // becomes a FAILED item instead of escaping into the enqueue caller.
+                    try {
+                        engine.start(next.request.id, start.torrentBytes, start.stagingDir, start.wantedFiles)
+                    } catch (t: Throwable) {
+                        onEngineEvent(EngineEvent.Failed(next.request.id, t.message ?: "engine start failed"))
+                    }
                 }
-            if (claimed) {
-                // start() only schedules work on the engine's own IO scope (no caller-thread
-                // blocking), and a synchronous throw (fake/real engine rejecting the args)
-                // becomes a FAILED item instead of escaping into the enqueue caller.
-                try {
-                    engine.start(next.request.id, start.torrentBytes, start.stagingDir, start.wantedFiles)
-                } catch (t: Throwable) {
-                    onEngineEvent(EngineEvent.Failed(next.request.id, t.message ?: "engine start failed"))
-                }
+            } finally {
+                idLock.unlock()
             }
         }
     }
@@ -504,18 +538,36 @@ class DownloadManager(
      * Fire-and-forget engine teardown of a terminal item's torrent — the handle is dead
      * weight (piece cache, announce timer) once the payload is finalized or abandoned.
      * The id may have been re-taken meanwhile (retry enqueue / addFiles' DONE-restart);
-     * both bump [generations], so cancel only while the item is still terminal AND
-     * [generation] — captured at DONE time — is unchanged: a mismatch means a fresh
-     * round owns the id and its engine.start must not be cancelled.
+     * both bump [generations]. Under the id's mutex — the same lock every engine.start
+     * for the id goes through — cancel only while the item is still terminal AND
+     * [generation] (captured at DONE time) is unchanged: a mismatch means a fresh round
+     * owns the id. The lock closes the re-check-then-cancel window completely: a start
+     * cannot commit between the re-check and the cancel, so a restarted round's fresh
+     * engine.start is never killed by a stale teardown.
      */
-    private fun teardownEngine(id: String, generation: Int?) {
-        val state = _items.value.firstOrNull { it.request.id == id }?.state ?: return
-        if (state in terminalStates && generations.value[id] == generation) engine.cancel(id)
+    private suspend fun teardownEngine(id: String, generation: Int?) {
+        lockFor(id).withLock {
+            val item = _items.value.firstOrNull { it.request.id == id } ?: return@withLock
+            if (item.state in terminalStates && generations.value[id] == generation) engine.cancel(id)
+        }
     }
 
     /** Bumps [id]'s generation — a new round took over the id (see [generations]). */
     private fun bumpGeneration(id: String) {
         generations.update { it + (id to ((it[id] ?: 0) + 1)) }
+    }
+
+    /** [id]'s start/teardown lock (see [idLocks]); concurrent callers share one instance. */
+    private fun lockFor(id: String): Mutex {
+        var lock = Mutex()
+        idLocks.update { map ->
+            val existing = map[id]
+            if (existing == null) map + (id to lock) else {
+                lock = existing
+                map
+            }
+        }
+        return lock
     }
 
     /** Non-terminal items with their staged start; terminal items need no resume. */

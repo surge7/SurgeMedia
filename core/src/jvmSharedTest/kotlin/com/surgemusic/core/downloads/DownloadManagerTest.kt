@@ -520,6 +520,46 @@ class DownloadManagerTest {
         assertEquals(DownloadState.DOWNLOADING, item(manager, "t-1").state)
     }
 
+    @Test
+    fun addFilesRestartStressTeardownNeverKillsFreshRound() = runBlocking {
+        val fake = FakeEngine().apply { files = fourFiles }
+        val engine = OrderingEngine(fake)
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
+        fake.awaitSubscribed()
+        manager.enqueue(request("t-1", sizeBytes = 100), torrent, "/staging/t-1", wantedFileIndices = setOf(0))
+
+        repeat(40) { round ->
+            awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+            assertTrue(fake.events.tryEmit(EngineEvent.Progress("t-1", bytesDone = 50, bytesTotal = 100, downloadSpeed = 10, peers = 2)))
+            assertTrue(fake.events.tryEmit(EngineEvent.Completed("t-1")))
+            awaitItem(manager, "t-1") { it.state == DownloadState.DONE }
+
+            // Restart immediately, racing the previous round's fire-and-forget DONE
+            // teardown: the restarted round must reach DOWNLOADING again (never left
+            // CANCELLED), keep taking progress events, and no engine cancel may land
+            // after its fresh start.
+            assertTrue(manager.addFiles("t-1", if (round % 2 == 0) setOf(1) else setOf(2)), "round $round: restart refused")
+            val restarted = awaitItem(manager, "t-1") {
+                if (it.state == DownloadState.CANCELLED) error("round $round left CANCELLED: ${manager.items.value}")
+                it.state == DownloadState.DOWNLOADING
+            }
+            assertEquals(0L, restarted.bytesDone, "a restarted round starts from zero")
+            withTimeout(5_000) { while (fake.started.value.size < round + 2) delay(10) }
+            assertTrue(
+                engine.log.drop(engine.log.lastIndexOf("start:t-1") + 1).none { it == "cancel:t-1" },
+                "round $round: stale DONE teardown cancelled the fresh start: ${engine.log}",
+            )
+            assertTrue(fake.events.tryEmit(EngineEvent.Progress("t-1", bytesDone = 60, bytesTotal = 200, downloadSpeed = 10, peers = 2)))
+            awaitItem(manager, "t-1") { it.bytesDone == 60L }
+        }
+        delay(250) // settle: a wrongly-issued teardown cancel would have landed by now
+        assertTrue(
+            engine.log.drop(engine.log.lastIndexOf("start:t-1") + 1).none { it == "cancel:t-1" },
+            "no cancel may follow the last fresh start: ${engine.log}",
+        )
+        assertEquals(DownloadState.DOWNLOADING, item(manager, "t-1").state)
+    }
+
     // ── Queue persistence (crash/exit recovery) ──────────────────────────────────────
 
     @Test
