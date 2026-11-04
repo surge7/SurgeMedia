@@ -38,8 +38,13 @@ class DesktopFileCleaner(private val settings: DesktopSettingsStore) : DownloadF
 
     override suspend fun deleteFor(item: DownloadItem): Result<Int> = runCatching {
         withContext(Dispatchers.IO) {
-            val albumDir = sanitizeDirName(item.request.title).take(120)
-            roots().sumOf { root -> deleteTree(root.resolve(albumDir)) }
+            val albumDir = sanitizeAlbumName(item.request.title)
+            // Final guard (sanitizeAlbumName already rejects these): a blank or dot
+            // segment resolves against the root as the root itself — never recurse.
+            require(albumDir.isNotBlank() && albumDir != "." && albumDir != "..") {
+                "degenerate album dir for ${item.request.title}"
+            }
+            roots().sumOf { root -> deleteTree(containedChild(root, albumDir) ?: return@sumOf 0) }
         }
     }
 
@@ -75,9 +80,16 @@ class DesktopFileCleaner(private val settings: DesktopSettingsStore) : DownloadF
         return files
     }
 
-    // Same rule as androidMain's MediaFiles.sanitizeDirName / DesktopFinalizer.sanitize —
-    // duplicated locally to avoid a cross-module dependency (DesktopFinalizer duplicates it too).
-    private fun sanitizeDirName(title: String) = title.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
+    /**
+     * `root/<name>` only when the resolved path is provably [root]'s child — canonical
+     * prefix check so a mangled name can never delete above the root (prefix equality
+     * alone would let "SurgeMedia2" match "SurgeMedia"). Null when it is not.
+     */
+    private fun containedChild(root: File, name: String): File? {
+        val child = root.resolve(name)
+        val rootPath = root.canonicalPath + File.separator
+        return if (child.canonicalPath.startsWith(rootPath)) child else null
+    }
 
     private companion object {
         const val BRAND_DIR = "SurgeMedia"
