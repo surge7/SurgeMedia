@@ -18,6 +18,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -28,6 +30,14 @@ import kotlinx.coroutines.launch
  * into one ongoing notification (title, "N active · speed/s · M queued", indeterminate
  * progress, single "Pause all" action routed back to this service as [ACTION_PAUSE_ALL]).
  * It stops itself (with `stopForeground`) once nothing is QUEUED/DOWNLOADING/FINALIZING/PAUSED.
+ *
+ * dataSync quota (Android 15: 6h per 24h window, see [DataSyncQuota]): the service feeds
+ * its wall time to `AppContainer.dataSyncQuota` ([DataSyncQuota.onServiceStarted] in
+ * [onStartCommand], [DataSyncQuota.onServiceStopped] in [onDestroy]) and re-checks the
+ * budget every minute on the same scope — when only the 15-minute margin is left it
+ * pauses the queue, posts a quota-paused notice and stops itself BEFORE the system
+ * timeout escalates to a force-stop ([onTimeout] stays as the backstop for a lost
+ * segment / process death).
  */
 class DownloadService : Service() {
 
@@ -37,6 +47,7 @@ class DownloadService : Service() {
     // app resume). NotificationManager.notify is thread-safe off-main.
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var observer: Job? = null
+    private var quotaWatch: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -66,7 +77,9 @@ class DownloadService : Service() {
             buildNotification(emptyList()),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
         )
+        AppContainer.dataSyncQuota.onServiceStarted()
         observeItems()
+        observeQuota()
         if (intent?.action == ACTION_PAUSE_ALL) {
             scope.launch { AppContainer.downloadManager.pauseAll() }
         }
@@ -96,6 +109,10 @@ class DownloadService : Service() {
     }
 
     override fun onDestroy() {
+        // Close the quota segment on every teardown path (quota pause, idle stop,
+        // onTimeout, system kill with onDestroy delivered) so only real FGS wall time
+        // counts against the 6h budget.
+        AppContainer.dataSyncQuota.onServiceStopped()
         scope.cancel()
         super.onDestroy()
     }
@@ -114,6 +131,49 @@ class DownloadService : Service() {
             }
         }
     }
+
+    /**
+     * One quota watcher for the service's lifetime (same re-entry guard as
+     * [observeItems]): every [QUOTA_CHECK_INTERVAL_MS] on the service scope, stop
+     * gracefully once only the 15-minute margin of the dataSync budget is left —
+     * the system must never be the one to kill us (mid-write finalization included).
+     */
+    private fun observeQuota() {
+        if (quotaWatch?.isActive == true) return
+        quotaWatch = scope.launch {
+            while (isActive) {
+                if (AppContainer.dataSyncQuota.shouldPause()) {
+                    pauseForQuota()
+                    return@launch
+                }
+                delay(QUOTA_CHECK_INTERVAL_MS)
+            }
+        }
+    }
+
+    /**
+     * Budget spent down to the margin: pause everything (the ids land in
+     * AppContainer's quota-paused set so MainActivity.onResume resumes them —
+     * foreground app time consumes no dataSync quota), leave a dismissible notice
+     * with the localized reason (its own notification id — [stopForeground] below
+     * removes only the ongoing FGS one), then go away before the 6h timeout.
+     */
+    private fun pauseForQuota() {
+        AppContainer.pauseForQuota()
+        getSystemService(NotificationManager::class.java)
+            ?.notify(QUOTA_NOTIFICATION_ID, buildQuotaNotification())
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    /** The quota notice: same channel/icon style as the ongoing one, quota text as content. */
+    private fun buildQuotaNotification(): Notification =
+        Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_downloads)
+            .setContentTitle(getString(R.string.notification_title_downloads))
+            .setContentText(getString(R.string.download_paused_quota))
+            .setOnlyAlertOnce(true)
+            .build()
 
     private fun buildNotification(items: List<DownloadItem>): Notification {
         val downloading = items.filter { it.state == DownloadState.DOWNLOADING }
@@ -145,6 +205,10 @@ class DownloadService : Service() {
     private companion object {
         const val CHANNEL_ID = "downloads"
         const val NOTIFICATION_ID = 1
+
+        /** Quota-paused notice: separate id so stopForeground(REMOVE) keeps it visible. */
+        const val QUOTA_NOTIFICATION_ID = 2
+        const val QUOTA_CHECK_INTERVAL_MS = 60_000L
         const val ACTION_PAUSE_ALL = "com.surgemusic.app.downloads.PAUSE_ALL"
         val ACTIVE_STATES = setOf(
             DownloadState.QUEUED,

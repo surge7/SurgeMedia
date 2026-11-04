@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import android.util.Log
 import com.surgemusic.app.downloads.AndroidQueuePersistence
+import com.surgemusic.app.downloads.DataSyncQuota
 import com.surgemusic.app.downloads.DownloadService
 import com.surgemusic.app.downloads.MediaStoreCleaner
 import com.surgemusic.app.downloads.MediaStoreFinalizer
@@ -21,6 +22,7 @@ import com.surgemusic.app.ui.library.LibraryViewModel
 import com.surgemusic.app.ui.settings.SettingsViewModel
 import com.surgemusic.core.downloads.DownloadManager
 import com.surgemusic.core.downloads.DownloadRequest
+import com.surgemusic.core.downloads.DownloadState
 import com.surgemusic.core.downloads.PreparedTorrent
 import com.surgemusic.core.engine.TorrentEngine
 import com.surgemusic.core.engine.jvm.JLibTorrentEngine
@@ -203,8 +205,81 @@ object AppContainer {
     }
     private val networkGateRegistered = AtomicBoolean(false)
 
-    /** Foreground start; called from MainActivity.onResume (app is in the foreground). */
+    /**
+     * dataSync FGS budget (6h per 24h rolling window on Android 15): DownloadService
+     * accumulates its wall time here and self-pauses at the threshold; this gate
+     * withholds the FGS once the budget is spent. Backed by the settings prefs file
+     * (`data_sync_*` keys) so the count survives process death.
+     */
+    val dataSyncQuota: DataSyncQuota by lazy {
+        DataSyncQuota(
+            SharedPreferencesStore(appContext.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)),
+        )
+    }
+
+    private val quotaLock = Any()
+
+    /**
+     * Ids the quota pause stopped (NetworkGate-style self-tracked ids — no DownloadItem
+     * field, "acceptable v1" per plan). Only items that were DOWNLOADING land here, so
+     * a user's manual pause is never overridden by [resumeQuotaPaused].
+     */
+    private val quotaPausedIds = mutableSetOf<String>()
+
+    /**
+     * Called by DownloadService's periodic check when only the 15-minute quota margin
+     * is left: snapshots the DOWNLOADING ids as quota-paused, then pauses the queue.
+     * QUEUED items stay QUEUED — with the FGS gone they wait for the app's next
+     * foreground spell ([resumeQuotaPaused]) or for the 24h window rollover.
+     */
+    fun pauseForQuota() {
+        val ids = downloadManager.items.value
+            .filter { it.state == DownloadState.DOWNLOADING }
+            .map { it.request.id }
+        synchronized(quotaLock) { quotaPausedIds += ids }
+        downloadManager.pauseAll()
+        Log.i(TAG, "quota pause: ${ids.size} item(s), remaining=${dataSyncQuota.remainingMs()} ms")
+    }
+
+    /**
+     * Foreground heal for the quota pause (MainActivity.onResume, next to
+     * [healNetworkGate]): quota-paused items download again while the app is visible —
+     * foreground app time consumes no dataSync FGS quota, so no service is needed.
+     * Wi-Fi-only is honored: on a metered network the ids stay parked until
+     * [startNetworkGate]'s unmetered branch calls this again. Cleared ids resume via
+     * the manager (its resume guard makes re-runs harmless).
+     */
+    fun resumeQuotaPaused() {
+        val ids = synchronized(quotaLock) { quotaPausedIds.toList() }
+        if (ids.isEmpty()) return
+        if (settings.wifiOnly.value && !activeNetworkUnmetered()) {
+            Log.i(TAG, "quota resume deferred: metered network with Wi-Fi-only on")
+            return
+        }
+        synchronized(quotaLock) { quotaPausedIds.clear() }
+        ids.forEach { downloadManager.resume(it) }
+        Log.i(TAG, "quota resume: ${ids.size} item(s)")
+    }
+
+    private fun activeNetworkUnmetered(): Boolean {
+        val manager = appContext.getSystemService(ConnectivityManager::class.java) ?: return false
+        val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return false
+        return caps.isEffectivelyUnmetered()
+    }
+
+    /**
+     * Foreground start; called from MainActivity.onResume (app is in the foreground)
+     * and after each enqueue. Quota gate: with only the 15-minute dataSync margin left
+     * the FGS is NOT started — Android 15 would otherwise run it into the 6h timeout
+     * and force-stop the app mid-write. Items stay QUEUED/PAUSED with the quota reason
+     * ([pauseForQuota]); they run while the app is foregrounded ([resumeQuotaPaused])
+     * and the FGS comes back once the 24h window rolls over (next call with budget).
+     */
     fun startDownloadService() {
+        if (dataSyncQuota.shouldPause()) {
+            Log.i(TAG, "dataSync quota spent (remaining=${dataSyncQuota.remainingMs()} ms) — FGS withheld")
+            return
+        }
         appContext.startForegroundService(Intent(appContext, DownloadService::class.java))
     }
 
@@ -223,6 +298,8 @@ object AppContainer {
             } else if (hasUnmetered) {
                 val resumed = networkGate.resumeAutoPaused { downloadManager.resume(it) }
                 if (resumed.isNotEmpty()) Log.i(TAG, "gate resumed ${resumed.size} item(s): $resumed")
+                // Quota-paused ids parked by Wi-Fi-only + metered resume with the network.
+                resumeQuotaPaused()
             }
         }
     }

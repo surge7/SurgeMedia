@@ -115,8 +115,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        AppContainer.startDownloadService()
+        AppContainer.startDownloadService() // quota-gated: re-evaluates FGS need, restarts after rollover
         AppContainer.healNetworkGate()
+        AppContainer.resumeQuotaPaused() // quota-paused items may run in the foreground (no FGS needed)
     }
 
     /**

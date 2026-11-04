@@ -7,4 +7,5 @@
     <string name="notification_active_count">Активных: %1$d</string>
     <string name="notification_queued_count">В очереди: %1$d</string>
     <string name="notification_speed_per_second">%1$s/с</string>
+    <string name="download_paused_quota">Загрузка приостановлена — исчерпана квота Android на фоновую загрузку. Откройте приложение, чтобы продолжить.</string>
 </resources>

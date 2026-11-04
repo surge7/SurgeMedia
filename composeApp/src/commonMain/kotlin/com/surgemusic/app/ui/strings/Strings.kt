@@ -80,6 +80,7 @@ interface AppStrings {
     fun peersCount(n: Int): String
     fun deletedFiles(n: Int): String
     fun deleteFailed(detail: String?): String
+    val downloadPausedQuota: String
 
     // Downloaded library
     val libraryHeader: String
@@ -231,6 +232,8 @@ object EnStrings : AppStrings {
     override fun peersCount(n: Int) = "$n peers"
     override fun deletedFiles(n: Int) = "Deleted $n file(s)"
     override fun deleteFailed(detail: String?) = "Delete failed: ${detail ?: unknownError}"
+    override val downloadPausedQuota =
+        "Paused — Android background download quota reached. Reopen the app to continue."
 
     override val libraryHeader = "Downloaded"
     override val refresh = "Refresh"
@@ -393,6 +396,9 @@ object RuStrings : AppStrings {
     override fun deletedFiles(n: Int) =
         if (n % 10 == 1 && n % 100 != 11) "Удалён $n файл" else "Удалено $n " + ruPlural(n, "файл", "файла", "файлов")
     override fun deleteFailed(detail: String?) = "Не удалось удалить: ${detail ?: unknownError}"
+    override val downloadPausedQuota =
+        "Загрузка приостановлена — исчерпана квота Android на фоновую загрузку. " +
+            "Откройте приложение, чтобы продолжить."
 
     override val libraryHeader = "Скачанное"
     override val refresh = "Обновить"
