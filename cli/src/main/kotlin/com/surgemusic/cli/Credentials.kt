@@ -43,11 +43,14 @@ private fun warnIfInsecurePermissions(file: Path, what: String) {
     }
 }
 
-fun loadCredentials(): Credentials? {
+/** ~/.config/surgemusic — injectable so tests can point the file lookups at a temp dir. */
+private fun defaultBaseDir(): Path = Path.of(System.getProperty("user.home"), ".config", "surgemusic")
+
+fun loadCredentials(baseDir: Path = defaultBaseDir()): Credentials? {
     val envUser = System.getenv("RUTRACKER_USER")
     val envPass = System.getenv("RUTRACKER_PASS")
     if (!envUser.isNullOrBlank() && !envPass.isNullOrBlank()) return Credentials(envUser, envPass)
-    val file = Path.of(System.getProperty("user.home"), ".config", "surgemusic", "credentials")
+    val file = baseDir.resolve("credentials")
     if (Files.isRegularFile(file)) {
         warnIfInsecurePermissions(file, what = "credentials")
         val lines = Files.readAllLines(file).map { it.trim() }.filter { it.isNotEmpty() }
@@ -56,12 +59,12 @@ fun loadCredentials(): Credentials? {
     return null
 }
 
-fun loadSessionConfig(): SessionConfig? {
+fun loadSessionConfig(baseDir: Path = defaultBaseDir()): SessionConfig? {
     val envCookies = System.getenv("RUTRACKER_COOKIES")
     if (!envCookies.isNullOrBlank()) {
         return SessionConfig(envCookies, System.getenv("RUTRACKER_UA")?.takeIf { it.isNotBlank() })
     }
-    val file = Path.of(System.getProperty("user.home"), ".config", "surgemusic", "cookies")
+    val file = baseDir.resolve("cookies")
     if (Files.isRegularFile(file)) {
         warnIfInsecurePermissions(file, what = "cookies")
         val lines = Files.readAllLines(file).map { it.trim() }.filter { it.isNotEmpty() }

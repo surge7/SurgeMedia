@@ -21,16 +21,42 @@ import kotlin.time.Duration.Companion.minutes
 private const val DEFAULT_TIMEOUT_MINUTES = 30L
 
 fun main(args: Array<String>) = runBlocking {
-    when (args.getOrNull(0)?.lowercase()) {
-        "login" -> cmdLogin()
-        "session" -> cmdSession()
-        // `runBlocking`'s lambda is not inline, so a bare non-local `return` is prohibited;
-        // usage() returns Nothing, so the labelled return is well-typed and equivalent.
-        "search" -> cmdSearch(args.getOrNull(1) ?: return@runBlocking usage("search requires a query"))
-        "download" -> cmdDownload(args.drop(1))
-        "version" -> println("Surge Media ${Version.APP}")
-        else -> usage(null)
+    when (val cmd = parseCommand(args.toList())) {
+        Command.Login -> cmdLogin()
+        Command.Session -> cmdSession()
+        is Command.Search -> cmdSearch(cmd.query)
+        is Command.Download -> cmdDownload(cmd.args)
+        Command.Version -> println("Surge Media ${Version.APP}")
+        is Command.MissingArg -> usage(cmd.message)
+        Command.Usage -> usage(null)
     }
+}
+
+/**
+ * Pure view of argv: which command to run, with its required argument already picked out.
+ * Extracted from [main] so the dispatch table is unit-testable (the cmd* functions hit
+ * the network). [MissingArg] is the usage-error (exit 2) path; [Usage] prints plain usage.
+ */
+internal sealed interface Command {
+    data object Login : Command
+    data object Session : Command
+    data class Search(val query: String) : Command
+    /** raw arguments after the command word; parsed further by [parseDownloadArgs] */
+    data class Download(val args: List<String>) : Command
+    data object Version : Command
+    /** recognized command missing its required argument — usage error, exit 2 */
+    data class MissingArg(val message: String) : Command
+    /** no arguments or unrecognized command — plain usage text, exit 0 */
+    data object Usage : Command
+}
+
+internal fun parseCommand(args: List<String>): Command = when (args.getOrNull(0)?.lowercase()) {
+    "login" -> Command.Login
+    "session" -> Command.Session
+    "search" -> args.getOrNull(1)?.let(Command::Search) ?: Command.MissingArg("search requires a query")
+    "download" -> Command.Download(args.drop(1))
+    "version" -> Command.Version
+    else -> Command.Usage
 }
 
 private fun newClient(): RutrackerClient =
@@ -113,14 +139,40 @@ private suspend fun cmdSearch(query: String) {
     }
 }
 
-private suspend fun cmdDownload(args: List<String>) {
-    val topicId = args.getOrNull(0)?.toLongOrNull() ?: return usage("download requires a numeric topicId")
-    val outDir = args.drop(1).option("--out") ?: Path.of(System.getProperty("user.home"), "Music", "SurgeMusic").toString()
-    val timeoutArg = args.drop(1).option("--timeout-minutes")
+/** The usage-error text for a bad --timeout-minutes value (exit 2). */
+private const val TIMEOUT_MINUTES_USAGE = "--timeout-minutes must be a positive number of minutes"
+
+/** Pure result of `download` argument parsing — [Err] is the usage-error (exit 2) path. */
+internal sealed interface DownloadParse {
+    data class Ok(val topicId: Long, val outDir: String?, val timeoutMinutes: Long) : DownloadParse
+    data class Err(val message: String) : DownloadParse
+}
+
+/**
+ * Pure parse of the arguments after `download` — extracted from [cmdDownload] so the
+ * validation rules (numeric topicId, positive --timeout-minutes) are unit-testable.
+ * [DownloadParse.Ok.outDir] is null when --out is absent; the caller substitutes the default.
+ */
+internal fun parseDownloadArgs(args: List<String>): DownloadParse {
+    val topicId = args.getOrNull(0)?.toLongOrNull()
+        ?: return DownloadParse.Err("download requires a numeric topicId")
+    val rest = args.drop(1)
+    val timeoutArg = rest.option("--timeout-minutes")
     val timeoutMinutes =
         if (timeoutArg == null) DEFAULT_TIMEOUT_MINUTES
-        else timeoutArg.toLongOrNull() ?: usage("--timeout-minutes must be a positive number of minutes")
-    if (timeoutMinutes <= 0) usage("--timeout-minutes must be a positive number of minutes")
+        else timeoutArg.toLongOrNull() ?: return DownloadParse.Err(TIMEOUT_MINUTES_USAGE)
+    if (timeoutMinutes <= 0) return DownloadParse.Err(TIMEOUT_MINUTES_USAGE)
+    return DownloadParse.Ok(topicId, rest.option("--out"), timeoutMinutes)
+}
+
+private suspend fun cmdDownload(args: List<String>) {
+    val options = when (val parsed = parseDownloadArgs(args)) {
+        is DownloadParse.Ok -> parsed
+        is DownloadParse.Err -> usage(parsed.message)
+    }
+    val topicId = options.topicId
+    val outDir = options.outDir ?: Path.of(System.getProperty("user.home"), "Music", "SurgeMusic").toString()
+    val timeoutMinutes = options.timeoutMinutes
 
     newClient().use { client ->
         openSession(client)
