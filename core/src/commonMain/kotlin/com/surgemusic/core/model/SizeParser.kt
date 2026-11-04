@@ -1,7 +1,10 @@
 package com.surgemusic.core.model
 
 object SizeParser {
-    private val pattern = Regex("([\\d.,]+)\\s*([КкMмGгTtKk]?[БбBb]|КБ|МБ|ГБ|ТБ|KB|MB|GB|TB|KiB|MiB|GiB|TiB)")
+    // Unit prefix class carries both cases per letter: К+к (Cyrillic), M+м, G+г, T+т
+    // (т was missing — "1,5 тб" silently parsed to 0), K+k; the uppercase Cyrillic
+    // МБ/ГБ/ТБ forms are covered by the explicit alternatives after the class.
+    private val pattern = Regex("([\\d.,]+)\\s*([КкMмGгTтtKk]?[БбBb]|КБ|МБ|ГБ|ТБ|KB|MB|GB|TB|KiB|MiB|GiB|TiB)")
 
     fun parseBytes(text: String): Long {
         val cleaned = text.replace("\u00A0", " ").replace(160.toChar(), ' ')

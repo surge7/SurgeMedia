@@ -76,4 +76,40 @@ class SearchPageParserTest {
         assertEquals(TrackerErrorKind.PARSE, err.kind)
         assertTrue(err.selector.isNullOrEmpty().not())
     }
+
+    @Test fun topicIdFallbackIgnoresStartPaginationParameter() {
+        // data-topic_id missing: the href fallback must not eat "start=100"'s tail as the
+        // topic id (the unanchored t=(\d+) matched star*t=100*); the ?/& anchor skips it
+        // and reads the real t=.
+        val html = """
+            <html><body><table id="tor-tbl"><tbody>
+            <tr><td><a class="tt-text" href="viewtopic.php?start=100&t=6918919">Album (FLAC)</a></td></tr>
+            </tbody></table></body></html>
+        """.trimIndent()
+        val page = SearchPageParser.parse(html, start = 100)
+        assertEquals(1, page.rows.size)
+        assertEquals(6918919L, page.rows[0].topicId)
+    }
+
+    @Test fun emptySearchMarkerYieldsEmptyPage() {
+        // rutracker keeps #tor-tbl (headers only) on legitimately empty searches and
+        // marks them with "Ничего не найдено" — a valid empty page, not an error.
+        val html = """
+            <html><body><table id="tor-tbl"><thead><tr><th>Тема</th></tr></thead><tbody></tbody></table>
+            <p>Ничего не найдено</p></body></html>
+        """.trimIndent()
+        val page = SearchPageParser.parse(html, start = 0)
+        assertEquals(0, page.rows.size)
+    }
+
+    @Test fun emptyTableWithoutNoResultsMarkerThrowsParse() {
+        // #tor-tbl rendered but zero rows parsed and no "Ничего не найдено" marker — the
+        // row selectors matched nothing (markup changed); must not pass as "no results".
+        val html = """
+            <html><body><table id="tor-tbl"><thead><tr><th>Тема</th></tr></thead><tbody></tbody></table></body></html>
+        """.trimIndent()
+        val err = assertFailsWith<TrackerError> { SearchPageParser.parse(html, start = 0) }
+        assertEquals(TrackerErrorKind.PARSE, err.kind)
+        assertTrue(err.selector!!.contains("#tor-tbl"))
+    }
 }

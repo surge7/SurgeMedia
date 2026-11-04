@@ -30,7 +30,9 @@ object SearchPageParser {
             val link = tr.selectFirst("a.tt-text") ?: tr.selectFirst("a.tt-link") ?: return@mapNotNull null
             val href = link.attr("href")
             val topicId = link.attr("data-topic_id").toLongOrNull()
-                ?: Regex("t=(\\d+)").find(href)?.groupValues?.get(1)?.toLongOrNull()
+                // anchored to ? or & — the unanchored `t=(\d+)` matched the tail of
+                // `start=100` (paginated hrefs) and parsed a bogus topic id
+                ?: Regex("[?&]t=(\\d+)").find(href)?.groupValues?.get(1)?.toLongOrNull()
                 ?: return@mapNotNull null
             val forumLink = tr.selectFirst("td.f-name-col a")
                 ?: tr.selectFirst("td.f-name a")
@@ -53,6 +55,18 @@ object SearchPageParser {
                 seeds = seeds,
                 leechs = leechs,
                 dateText = dateText,
+            )
+        }
+        // Silent-empty guard: rutracker keeps #tor-tbl (headers only, zero data rows)
+        // on legitimately empty searches and marks them with "Ничего не найдено" — so an
+        // empty row set WITH that marker is a valid empty page. Zero rows WITHOUT the
+        // marker means the table rendered but our row selectors matched nothing: the
+        // markup changed and pretending "no results" would silently hide a real listing.
+        if (rows.isEmpty() && !html.contains("Ничего не найдено", ignoreCase = true)) {
+            throw TrackerError(
+                "search table present but 0 rows parsed (and no \"Ничего не найдено\" marker) — markup changed?",
+                TrackerErrorKind.PARSE,
+                selector = "#tor-tbl tr",
             )
         }
         return SearchResultPage(rows = rows, start = start)

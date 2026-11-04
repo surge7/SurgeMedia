@@ -19,6 +19,9 @@ import com.surgemusic.core.engine.EngineSnapshot
 import com.surgemusic.core.engine.EngineState
 import com.surgemusic.core.engine.TorrentEngine
 import com.surgemusic.core.engine.TorrentFileInfo
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.HttpTimeout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,10 +34,14 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.Volatile
 
-class JLibTorrentEngine : TorrentEngine {
+class JLibTorrentEngine(
+    /** false disables the DHT bootstrap (loopback tests must stay off-router). */
+    private val dhtEnabled: Boolean = true,
+) : TorrentEngine {
 
     private companion object {
         /** Tracker-shim re-announce cadence (trackers default to 30–60 min; be eager). */
@@ -53,9 +60,25 @@ class JLibTorrentEngine : TorrentEngine {
     private val _events = MutableSharedFlow<EngineEvent>(extraBufferCapacity = 256)
     override val events: SharedFlow<EngineEvent> = _events.asSharedFlow()
 
-    private data class Active(val info: TorrentInfo, @Volatile var handle: TorrentHandle?)
+    /**
+     * Torrent entry, from [start] until adoption (handle == null — the "add window") or
+     * removal. Calls landing in the add window (cancel/pause/resume/[setWantedFiles])
+     * latch their intent here; the find loop in [start] applies the latches when it
+     * adopts the handle.
+     */
+    private data class Active(
+        val info: TorrentInfo,
+        @Volatile var handle: TorrentHandle?,
+        @Volatile var wantPaused: Boolean = false,
+        @Volatile var wantCancelled: Boolean = false,
+        @Volatile var pendingWanted: Set<Int>? = null,
+    )
+
     private val active = ConcurrentHashMap<String, Active>()
     private val completed: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** Errored ids — guards the exactly-once [EngineEvent.Failed] emission in [sampleStatus]. */
+    private val failed: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     /** One announce loop per id — a new [announceTrackers] call retires the previous job. */
     private val announceJobs = ConcurrentHashMap<String, Job>()
@@ -63,8 +86,25 @@ class JLibTorrentEngine : TorrentEngine {
     /** [setWantedFiles] timestamp per id — arms the stale-finished guard in [sampleStatus]. */
     private val pendingWanted = ConcurrentHashMap<String, Long>()
 
+    /**
+     * Tracker-shim HTTP client — ONE per engine (created lazily on the first announce;
+     * TrackerAnnouncer instances come and go per announce loop but the client outlives
+     * them), closed in [close]. Per-instance clients leaked an OkHttp dispatcher
+     * (threads + pool) on every engine start().
+     */
+    private val announceHttp: Lazy<HttpClient> = lazy {
+        HttpClient(OkHttp) {
+            install(HttpTimeout) { requestTimeoutMillis = 15_000 }
+        }
+    }
+
     init {
         session.start()
+        if (!dhtEnabled) {
+            // jlibtorrent 2.0.12.9: SessionManager.stopDht() is toggleDht(false) —
+            // applySettings(SettingsPack().setEnableDht(false)); no-op when already off.
+            runCatching { session.stopDht() }
+        }
         // Observability: libtorrent failure alerts (web-seed/tracker/peer/file errors)
         // previously vanished silently — a torrent stuck at 0% had no diagnosable trace.
         // stdout lands in logcat under System.out for both Android and desktop runs.
@@ -99,6 +139,11 @@ class JLibTorrentEngine : TorrentEngine {
      * exactly once (the atomic `completed.add(id)` check-and-add guards double emission
      * even when the poll loop and the initial sample race).
      *
+     * A torrent-level error (libtorrent's torrent_status.error — `st.errorCode().value()
+     * != 0` in jlibtorrent 2.0.12.9) emits [EngineEvent.Failed] exactly once per id
+     * (guarded by the `failed` set, same pattern as `completed`) and stops Progress —
+     * an errored torrent never moves, so polling it would spam identical Progress.
+     *
      * [pendingWanted] guards the window right after a [setWantedFiles]: the priority
      * change rides the session thread asynchronously, so a finished status read in that
      * window may predate the change (observed: priorities read back applied while
@@ -121,6 +166,11 @@ class JLibTorrentEngine : TorrentEngine {
                 }
             }
             if (id in completed) return
+            val ec = st.errorCode()
+            if (ec.value() != 0) {
+                if (failed.add(id)) _events.tryEmit(EngineEvent.Failed(id, "torrent error ${ec.value()}: ${ec.message()}"))
+                return
+            }
             if (isFinished(st)) {
                 if (completed.add(id)) _events.tryEmit(EngineEvent.Completed(id))
             } else {
@@ -153,17 +203,23 @@ class JLibTorrentEngine : TorrentEngine {
         // otherwise resume alongside the new one and double every announce.
         announceJobs.remove(id)?.cancel()
         announceJobs[id] = scope.launch {
-            val announcer = TrackerAnnouncer()
+            val announcer = TrackerAnnouncer(announceHttp.value)
             val infoHash = info.infoHashV1().toString()
             val total = runCatching { info.totalSize() }.getOrDefault(0L)
             var started = true
             while (active[id]?.handle != null && id !in completed) {
+                // left= counts the WANTED bytes (selection-aware: status().totalWanted()),
+                // not the whole torrent — left>0 is what marks us a leech; claiming the
+                // full size made selective announces lie to the tracker. totalSize() is
+                // the fallback for a failed/empty status read.
+                val left = runCatching { handle.status().totalWanted() }.getOrNull()
+                    ?.takeIf { it > 0 } ?: total
                 urls.forEach { url ->
                     val peers = announcer.announceOnce(
                         announceUrl = url,
                         infoHashHex = infoHash,
                         listenPort = listenPort(),
-                        leftBytes = total,
+                        leftBytes = left,
                         started = started,
                     )
                     if (peers != null) {
@@ -222,7 +278,11 @@ class JLibTorrentEngine : TorrentEngine {
                 return@launch
             }
             val dir = try {
-                File(targetDir).apply { mkdirs() }
+                File(targetDir).apply { mkdirs() }.also {
+                    // mkdirs() returns false without throwing (existing file, permissions);
+                    // letting it slide sent libtorrent into an eternal 0% stall — fail fast.
+                    if (!it.isDirectory) throw IOException("mkdirs failed for $targetDir")
+                }
             } catch (t: Throwable) {
                 _events.tryEmit(
                     EngineEvent.Failed(id, "staging dir unusable: ${t.message ?: t::class.simpleName}"),
@@ -240,6 +300,7 @@ class JLibTorrentEngine : TorrentEngine {
             // fresh add downloads only the newly wanted files.
             announceJobs.remove(id)?.cancel()
             completed.remove(id)
+            failed.remove(id)
             pendingWanted.remove(id)
             active.remove(id)?.handle?.let { runCatching { session.remove(it) } }
             val stray = runCatching { session.find(info.infoHashV1()) }.getOrNull()
@@ -300,7 +361,27 @@ class JLibTorrentEngine : TorrentEngine {
                 // are v1, so the v1 info-hash is the lookup key (Phase-1 usage).
                 val h = session.find(info.infoHashV1())
                 if (h != null) {
-                    active[id]?.handle = h
+                    val a = active[id]
+                    if (a == null || a.wantCancelled) {
+                        // cancel() latched during the add window: drop the just-adopted
+                        // torrent silently — no events for a cancelled id.
+                        runCatching { session.remove(h) }
+                        active.remove(id)
+                        return@launch
+                    }
+                    a.handle = h
+                    // Add-window latches: a [setWantedFiles] that landed while the handle
+                    // was still missing re-points the fresh selection first, then a latched
+                    // pause applies (mirrors the caller issuing addFiles/pause right after
+                    // start()). pendingWanted arms the same stale-finished guard as the live
+                    // [setWantedFiles] path, and clears Completed so the enlarged selection
+                    // can fire a fresh one.
+                    a.pendingWanted?.let {
+                        completed.remove(id)
+                        applyPriorities(h, info, it)
+                        pendingWanted[id] = System.currentTimeMillis()
+                    }
+                    if (a.wantPaused) runCatching { h.pause() }
                     _events.tryEmit(EngineEvent.Added(id))
                     extraPeers.forEach { (ip, port) -> addPeer(h, ip, port) }
                     announceTrackers(id, info, h)
@@ -312,19 +393,40 @@ class JLibTorrentEngine : TorrentEngine {
                 }
                 delay(200)
             }
-            if (active[id]?.handle == null) {
+            val adopted = active[id]
+            if (adopted != null && adopted.handle == null) {
                 active.remove(id)
-                _events.tryEmit(EngineEvent.Failed(id, "torrent handle not added within timeout"))
+                // A latched cancel means the id is dead by user intent — no Failed event.
+                if (!adopted.wantCancelled) {
+                    _events.tryEmit(EngineEvent.Failed(id, "torrent handle not added within timeout"))
+                }
             }
         }
     }
 
+    /**
+     * Pauses the torrent for [id]. In the add window (handle not yet adopted) the intent
+     * latches on the [Active] entry and the find loop in [start] applies it on adoption.
+     */
     override fun pause(id: String) {
-        active[id]?.handle?.let { runCatching { it.pause() } }
+        val a = active[id] ?: return
+        val handle = a.handle
+        if (handle == null) {
+            a.wantPaused = true
+            return
+        }
+        runCatching { handle.pause() }
     }
 
+    /** Resume — also clears a pause latched during the add window. */
     override fun resume(id: String) {
-        active[id]?.handle?.let { runCatching { it.resume() } }
+        val a = active[id] ?: return
+        val handle = a.handle
+        if (handle == null) {
+            a.wantPaused = false
+            return
+        }
+        runCatching { handle.resume() }
     }
 
     /**
@@ -338,7 +440,13 @@ class JLibTorrentEngine : TorrentEngine {
      */
     override fun setWantedFiles(id: String, wantedFiles: Set<Int>) {
         val a = active[id] ?: return
-        val handle = a.handle ?: return
+        val handle = a.handle
+        if (handle == null) {
+            // Add window: latch the selection — the find loop in [start] applies it when
+            // the handle is adopted (priorities first, then a latched pause).
+            a.pendingWanted = wantedFiles
+            return
+        }
         scope.launch {
             completed.remove(id)
             applyPriorities(handle, a.info, wantedFiles)
@@ -367,10 +475,24 @@ class JLibTorrentEngine : TorrentEngine {
         }
     }
 
+    /**
+     * Cancels [id]. In the add window (handle not yet adopted) the entry is KEPT with
+     * `wantCancelled` latched — the find loop in [start] drops it (session.remove, no
+     * events) when it adopts the handle; before that latch existed, a cancel racing the
+     * add window left the entry behind: the adopted torrent kept downloading and kept
+     * emitting events for a cancelled id.
+     */
     override fun cancel(id: String) {
         announceJobs.remove(id)?.cancel()
         pendingWanted.remove(id)
-        active.remove(id)?.handle?.let { runCatching { session.remove(it) } }
+        val a = active[id] ?: return
+        val handle = a.handle
+        if (handle == null) {
+            a.wantCancelled = true
+            return
+        }
+        active.remove(id)
+        runCatching { session.remove(handle) }
     }
 
     override fun snapshot(id: String): EngineSnapshot? {
@@ -394,6 +516,7 @@ class JLibTorrentEngine : TorrentEngine {
 
     override fun close() {
         scope.cancel()
+        if (announceHttp.isInitialized()) runCatching { announceHttp.value.close() }
         runCatching { session.stop() }
     }
 

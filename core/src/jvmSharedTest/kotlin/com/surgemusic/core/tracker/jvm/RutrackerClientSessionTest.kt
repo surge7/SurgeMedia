@@ -7,9 +7,11 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
+import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -36,9 +38,10 @@ class RutrackerClientSessionTest {
         )
         val result = c.search(SearchQuery(text = "pink floyd"))
         assertTrue(result.isSuccess, "${result.exceptionOrNull()}")
-        assertEquals(2, result.getOrNull()!!.rows.size)
+        // sanity field only — the full parse is SearchPageParserTest's job
+        assertTrue(result.getOrNull()!!.rows.isNotEmpty())
 
-        val req = server.takeRequest()
+        val req = assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
         assertEquals("bb_session=x1; cf_clearance=y2; bb_guid=g3; bb_ssl=1", req.headers["Cookie"])
         assertTrue(req.headers["User-Agent"]!!.contains("Chrome/155"))
     }

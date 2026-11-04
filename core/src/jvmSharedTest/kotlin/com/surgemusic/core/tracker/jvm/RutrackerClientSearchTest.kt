@@ -6,9 +6,11 @@ import com.surgemusic.core.tracker.TrackerErrorKind
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class RutrackerClientSearchTest {
@@ -27,13 +29,15 @@ class RutrackerClientSearchTest {
 
         val result = c.search(SearchQuery(text = "pink floyd", start = 0))
         assertTrue(result.isSuccess, "${result.exceptionOrNull()}")
-        assertEquals(2, result.getOrNull()!!.rows.size)
+        // sanity field only — the full parse is SearchPageParserTest's job
+        assertTrue(result.getOrNull()!!.rows.isNotEmpty())
 
         // MockWebServer 4.12.0 has no takeRequest(long) overload, and even if it did,
         // takeRequest pops from the head — so consume the login request first, then take
-        // the search request (the plan's "// skip the login request" intent).
-        server.takeRequest()
-        val searchReq = server.takeRequest()
+        // the search request (the plan's "// skip the login request" intent). Both takes
+        // are bounded so a missing request fails the test instead of hanging it.
+        assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
+        val searchReq = assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
         assertTrue(searchReq.path!!.startsWith("/forum/tracker.php"))
         assertTrue(searchReq.path!!.contains("nm=pink+floyd") || searchReq.path!!.contains("nm=pink%20floyd"))
         assertTrue(searchReq.headers["Cookie"]!!.contains("bb_session=ok"))

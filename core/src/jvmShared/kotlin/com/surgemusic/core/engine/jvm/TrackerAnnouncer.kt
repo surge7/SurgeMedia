@@ -1,8 +1,6 @@
 package com.surgemusic.core.engine.jvm
 
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsBytes
 import io.ktor.http.URLBuilder
@@ -24,11 +22,14 @@ import java.util.concurrent.ThreadLocalRandom
  * Host header, so rewriting the tracker URL to an IP is NOT an option; the announce
  * must be a real HTTP GET to the original URL.
  */
-internal class TrackerAnnouncer {
-
-    private val http = HttpClient(OkHttp) {
-        install(HttpTimeout) { requestTimeoutMillis = 15_000 }
-    }
+internal class TrackerAnnouncer(
+    /**
+     * Caller-owned HTTP client (one per engine, see [JLibTorrentEngine.close]) — the
+     * announcer is created per announce loop, so owning a client here leaked one per
+     * engine start().
+     */
+    private val http: HttpClient,
+) {
 
     /** One announce for [announceUrl]; returns discovered peers, or null on any failure. */
     suspend fun announceOnce(
@@ -39,7 +40,12 @@ internal class TrackerAnnouncer {
         started: Boolean,
     ): List<Pair<String, Int>>? = runCatching {
         val url = URLBuilder(announceUrl).apply {
-            parameters.append("info_hash", percentEncodeRawBytes(hexToBytes(infoHashHex)))
+            // info_hash arrives PRE-encoded (%XX over the raw 20 bytes) and must pass
+            // through verbatim: the decoded `parameters` view re-encodes '%' as "%25XX",
+            // producing an announce the tracker cannot decode. encodedParameters appends
+            // the string as-is. The other params are plain ASCII (digits / '-' / a-z),
+            // chars Ktor never encodes — `peer_id()` stays on the decoded view.
+            encodedParameters.append("info_hash", percentEncodeRawBytes(hexToBytes(infoHashHex)))
             parameters.append("peer_id", peerId())
             parameters.append("port", listenPort.coerceAtLeast(1).toString())
             parameters.append("uploaded", "0")

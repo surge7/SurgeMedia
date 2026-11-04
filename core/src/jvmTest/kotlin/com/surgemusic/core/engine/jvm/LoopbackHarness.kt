@@ -10,8 +10,10 @@ import kotlin.io.path.writeBytes
 
 class LoopbackHarness : AutoCloseable {
 
-    val seedEngine = JLibTorrentEngine()
-    val leechEngine = JLibTorrentEngine()
+    // DHT off: loopback tests never want bootstrap traffic to outer routers — peers come
+    // from the local seed engine only.
+    val seedEngine = JLibTorrentEngine(dhtEnabled = false)
+    val leechEngine = JLibTorrentEngine(dhtEnabled = false)
     val sourceDir: Path = Files.createTempDirectory("surgemusic-seed")
     val targetDir: Path = Files.createTempDirectory("surgemusic-leech")
     private val torrentBytes: ByteArray

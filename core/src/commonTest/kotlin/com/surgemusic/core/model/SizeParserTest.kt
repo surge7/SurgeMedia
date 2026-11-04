@@ -18,6 +18,10 @@ class SizeParserTest {
     @Test fun parsesCommaDecimals() {
         assertEquals((1.25 * 1024).toLong(), SizeParser.parseBytes("1,25 КБ"))
     }
+    @Test fun parsesLowercaseCyrillicTerabyte() {
+        assertEquals(1_649_267_441_664L, SizeParser.parseBytes("1,5 тб"))
+        assertEquals(549_755_813_888L, SizeParser.parseBytes("0,5 тб"))
+    }
     @Test fun parsesTwoPartRange() {
         // rutracker sometimes renders "700 МБ+700 МБ" style; take the first token
         assertEquals(700L * 1024 * 1024, SizeParser.parseBytes("700 МБ + 700 МБ"))

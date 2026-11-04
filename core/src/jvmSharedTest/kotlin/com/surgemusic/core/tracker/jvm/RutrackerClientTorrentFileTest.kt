@@ -6,10 +6,12 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
+import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class RutrackerClientTorrentFileTest {
@@ -35,8 +37,9 @@ class RutrackerClientTorrentFileTest {
         assertContentEquals(torrentBytes, result.getOrNull())
         // MockWebServer 4.12.0's takeRequest pops from the head — consume the login request
         // first (same adaptation as RutrackerClientSearchTest), then inspect the dl.php request.
-        server.takeRequest()
-        val req = server.takeRequest()
+        // Both takes are bounded so a missing request fails the test instead of hanging it.
+        assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
+        val req = assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
         assertTrue(req.path!!.startsWith("/forum/dl.php"))
         assertTrue(req.path!!.contains("t=567890"))
     }

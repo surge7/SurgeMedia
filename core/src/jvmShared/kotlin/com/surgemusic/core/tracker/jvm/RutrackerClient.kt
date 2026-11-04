@@ -86,9 +86,11 @@ class RutrackerClient(
             )
         }
         val cookie = resp.headers.getAll("Set-Cookie")
-            ?.firstNotNullOfOrNull { Regex("(?:bb_session|bb_data)=([^;]+)").find(it)?.groupValues?.get(1) }
+            ?.firstNotNullOfOrNull { Regex("(bb_session|bb_data)=([^;]+)").find(it)?.destructured }
         when {
-            cookie != null -> sessionCookie = "bb_session=$cookie"
+            // Preserve the cookie NAME the server matched (bb_session or legacy bb_data) —
+            // rewriting a bb_data login to bb_session= sends a cookie rutracker ignores.
+            cookie != null -> sessionCookie = "${cookie.component1()}=${cookie.component2()}"
             body.contains("captcha", ignoreCase = true) ->
                 throw TrackerError("login requires captcha; try again later or use a mirror", TrackerErrorKind.CAPTCHA)
             else -> throw TrackerError(parseLoginError(body) ?: "login failed (no session cookie)", TrackerErrorKind.AUTH)
