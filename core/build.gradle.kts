@@ -13,6 +13,9 @@ val hostOs: String = run {
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.library)
+    // @Serializable for PersistedDownload (QueuePersistence); the json runtime is already
+    // a commonMain dependency.
+    alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {

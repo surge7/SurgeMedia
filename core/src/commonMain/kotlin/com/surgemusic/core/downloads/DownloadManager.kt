@@ -3,15 +3,18 @@ package com.surgemusic.core.downloads
 import com.surgemusic.core.engine.EngineEvent
 import com.surgemusic.core.engine.TorrentEngine
 import com.surgemusic.core.engine.TorrentFileInfo
+import kotlin.io.encoding.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 enum class DownloadState { QUEUED, DOWNLOADING, PAUSED, FINALIZING, DONE, FAILED, CANCELLED }
 
@@ -35,20 +38,30 @@ data class DownloadItem(
 )
 
 /**
- * In-memory download queue and state machine over [TorrentEngine]
- * (spec §7 persistence is a hardening-phase item; no database in this phase).
+ * In-memory download queue and state machine over [TorrentEngine], with optional
+ * crash/exit recovery via [QueuePersistence]: non-terminal items are re-enqueued as
+ * QUEUED on init (torrent bytes ride along Base64-encoded).
  *
  * Slot accounting: an item holds a concurrency slot while DOWNLOADING or PAUSED
  * (pause does not free the slot; cancel/failure do). FINALIZING runs off the
  * concurrency count — the slot is freed when the engine reports Completed.
+ *
+ * @param maxConcurrent live slot limit — read per pump iteration, so a Settings change
+ *   takes effect without rebuilding the manager (the stores keep the 1–5 clamp; the
+ *   pump clamps again at read as a belt-and-braces).
+ * @param persistence optional queue store; null keeps the manager purely in-memory.
  */
 class DownloadManager(
     private val engine: TorrentEngine,
-    private val maxConcurrent: Int = 3,
+    private val maxConcurrent: StateFlow<Int> = MutableStateFlow(DEFAULT_MAX_CONCURRENT),
+    private val persistence: QueuePersistence? = null,
     private val finalize: suspend (item: DownloadItem, stagingDir: String) -> Result<String>,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pumpMutex = Mutex()
+
+    /** Serializes queue-store writes; saves are fire-and-forget on [scope]. */
+    private val persistenceMutex = Mutex()
 
     private val _items = MutableStateFlow<List<DownloadItem>>(emptyList())
     val items: StateFlow<List<DownloadItem>> = _items.asStateFlow()
@@ -74,6 +87,46 @@ class DownloadManager(
         scope.launch {
             engine.events.collect { onEngineEvent(it) }
         }
+        persistence?.let { store ->
+            scope.launch {
+                val entries = runCatching { store.load() }.getOrDefault(emptyList())
+                val stagedRestored = mutableMapOf<String, StagedStart>()
+                val requests = mutableListOf<DownloadRequest>()
+                for (entry in entries) {
+                    val bytes = entry.torrentBytesBase64
+                        ?.let { b64 -> runCatching { Base64.decode(b64) }.getOrNull() }
+                        ?: continue
+                    stagedRestored[entry.id] =
+                        StagedStart(bytes, entry.stagingPath, entry.wantedFiles.toSet())
+                    requests += DownloadRequest(
+                        id = entry.id,
+                        topicId = entry.topicId,
+                        title = entry.title,
+                        forumName = entry.forumName,
+                        sizeBytes = 0L, // selection-derived bookkeeping; Progress refreshes it
+                    )
+                }
+                if (requests.isEmpty()) return@launch
+                // staged first (same invariant as addFiles' DONE-restart): a pump racing
+                // the item insert must never see a QUEUED item without its staged start.
+                staged.update { it + stagedRestored }
+                _items.update { list ->
+                    // an enqueue may have claimed a restored id meanwhile — it wins
+                    list + requests
+                        .filter { req -> list.none { it.request.id == req.id } }
+                        .map { DownloadItem(it) }
+                }
+                pump()
+            }
+        }
+    }
+
+    /**
+     * Tears down the manager: cancels the engine-event collector, finalize continuations
+     * and persistence writes. Call together with [TorrentEngine.close] on app exit.
+     */
+    fun close() {
+        scope.cancel()
     }
 
     /**
@@ -101,13 +154,20 @@ class DownloadManager(
         staged.update {
             it + (request.id to StagedStart(torrentBytes, stagingDir, wantedFileIndices, files))
         }
+        var changed = false
         _items.update { list ->
-            if (existing != null) {
+            // Re-check inside the atomic update: the pre-check above runs on a snapshot,
+            // so two concurrent same-id enqueues could both pass it and both append.
+            val current = list.firstOrNull { it.request.id == request.id }
+            if (current != null && current.state !in terminalStates) return@update list
+            changed = true
+            if (current != null) {
                 list.map { if (it.request.id == request.id) DownloadItem(request) else it }
             } else {
                 list + DownloadItem(request)
             }
         }
+        if (changed) persistQueue()
         pump()
     }
 
@@ -147,45 +207,62 @@ class DownloadManager(
         if (start.files.isEmpty()) return false
         val wanted = start.wantedFiles.ifEmpty { start.files.mapTo(mutableSetOf()) { it.index } }
         if (wanted.containsAll(start.files.map { it.index })) return false
-        var liveUnion: Set<Int>? = null
-        var restarted = false
-        _items.update { list ->
-            list.map { item ->
-                if (item.request.id != id || liveUnion != null || restarted) return@map item
-                when (item.state) {
-                    DownloadState.DOWNLOADING, DownloadState.PAUSED -> {
-                        val union = start.wantedFiles + newFileIndices
-                        liveUnion = union
-                        val unionBytes = start.files
-                            .filter { it.index in union }
-                            .sumOf { it.sizeBytes }
-                        item.copy(bytesTotal = if (unionBytes > 0) unionBytes else item.bytesTotal)
+        return when (_items.value.firstOrNull { it.request.id == id }?.state) {
+            DownloadState.DOWNLOADING, DownloadState.PAUSED -> {
+                val union = start.wantedFiles + newFileIndices
+                var applied = false
+                _items.update { list ->
+                    list.map { item ->
+                        if (
+                            item.request.id == id && !applied &&
+                            (item.state == DownloadState.DOWNLOADING || item.state == DownloadState.PAUSED)
+                        ) {
+                            applied = true
+                            val unionBytes = start.files
+                                .filter { it.index in union }
+                                .sumOf { it.sizeBytes }
+                            item.copy(bytesTotal = if (unionBytes > 0) unionBytes else item.bytesTotal)
+                        } else {
+                            item
+                        }
                     }
-
-                    DownloadState.DONE -> {
-                        restarted = true
-                        val newBytes = start.files
-                            .filter { it.index in newFileIndices }
-                            .sumOf { it.sizeBytes }
-                            .takeIf { it > 0 }
-                        DownloadItem(item.request.copy(sizeBytes = newBytes ?: item.request.sizeBytes))
-                    }
-
-                    else -> item
                 }
-            }
-        }
-        return when {
-            liveUnion != null -> {
-                val union = liveUnion!!
+                if (!applied) return false // raced out of DOWNLOADING/PAUSED — nothing to merge
                 staged.update { it + (id to start.copy(wantedFiles = union)) }
                 engine.setWantedFiles(id, union)
+                persistQueue()
                 true
             }
 
-            restarted -> {
+            DownloadState.DONE -> {
+                // staged FIRST: flipping the item to QUEUED before `staged` holds the new
+                // selection would let a concurrent pump start the fresh round with the
+                // previous round's wanted-set.
                 staged.update { it + (id to start.copy(wantedFiles = newFileIndices)) }
+                var restarted = false
+                _items.update { list ->
+                    list.map { item ->
+                        if (item.request.id == id && !restarted && item.state == DownloadState.DONE) {
+                            restarted = true
+                            val newBytes = start.files
+                                .filter { it.index in newFileIndices }
+                                .sumOf { it.sizeBytes }
+                                .takeIf { it > 0 }
+                            DownloadItem(item.request.copy(sizeBytes = newBytes ?: item.request.sizeBytes))
+                        } else {
+                            item
+                        }
+                    }
+                }
+                if (!restarted) {
+                    // raced away from DONE (remove / re-enqueue won): drop the staged
+                    // write unless a live item re-owns the id (its enqueue manages its
+                    // own staged entry).
+                    if (_items.value.none { it.request.id == id }) staged.update { it - id }
+                    return false
+                }
                 pump()
+                persistQueue()
                 true
             }
 
@@ -217,6 +294,7 @@ class DownloadManager(
         if (cancelled) {
             engine.cancel(id)
             pump()
+            persistQueue()
         }
     }
 
@@ -238,9 +316,11 @@ class DownloadManager(
     /**
      * History removal: drops [id] from the list and from `staged`. An active item is
      * first cancelled exactly like [cancel] does (state CANCELLED + engine.cancel +
-     * pump) so the engine side is torn down too; terminal items (and one still
-     * FINALIZING — its finalize keeps running but the entry is gone) are dropped
-     * directly. Unknown id is a no-op.
+     * pump) so the engine side is torn down too; terminal items get the same engine
+     * teardown (their torrent handle is dead weight — the fire-and-forget DONE path
+     * may not have run yet, and re-firing cancel is harmless); one still FINALIZING —
+     * its finalize keeps running but the entry is gone — is dropped directly. Unknown
+     * id is a no-op.
      */
     fun remove(id: String) {
         val current = _items.value.firstOrNull { it.request.id == id } ?: return
@@ -252,22 +332,27 @@ class DownloadManager(
                 engine.cancel(id)
                 pump()
             }
+        } else if (current.state in terminalStates) {
+            engine.cancel(id)
         }
         _items.update { list -> list.filterNot { it.request.id == id } }
         staged.update { it - id }
+        persistQueue()
     }
 
     /**
      * History cleanup: drops every terminal item (DONE/FAILED/CANCELLED) and its
-     * `staged` entry; active items are untouched.
+     * `staged` entry, tearing down each one's engine torrent; active items are untouched.
      */
     fun clearCompleted() {
         val terminal = _items.value
             .filter { it.state in terminalStates }
             .mapTo(mutableSetOf()) { it.request.id }
         if (terminal.isEmpty()) return
+        terminal.forEach { engine.cancel(it) }
         _items.update { list -> list.filterNot { it.request.id in terminal } }
         staged.update { it - terminal }
+        persistQueue()
     }
 
     /** Starts queued items while free slots remain; called after every state change. */
@@ -286,14 +371,26 @@ class DownloadManager(
     }
 
     private fun runPump() {
+        // Queued items whose staged start is gone (staging dropped under a live item)
+        // are skipped, not stallers — the pump keeps serving the rest of the queue.
+        val skipped = mutableSetOf<String>()
         while (true) {
             val list = _items.value
-            val free = maxConcurrent - list.count {
+            // re-read per iteration so a live Settings change applies mid-drain; the
+            // stores clamp on write, this clamps at read against hand-edited values.
+            val slots = maxConcurrent.value.coerceIn(MIN_CONCURRENT, MAX_CONCURRENT)
+            val free = slots - list.count {
                 it.state == DownloadState.DOWNLOADING || it.state == DownloadState.PAUSED
             }
             if (free <= 0) return
-            val next = list.firstOrNull { it.state == DownloadState.QUEUED } ?: return
-            val start = staged.value[next.request.id] ?: return
+            val next =
+                list.firstOrNull { it.state == DownloadState.QUEUED && it.request.id !in skipped }
+                    ?: return
+            val start = staged.value[next.request.id]
+            if (start == null) {
+                skipped += next.request.id
+                continue
+            }
             val claimed =
                 mutateIf(next.request.id, guard = { it.state == DownloadState.QUEUED }) {
                     it.copy(state = DownloadState.DOWNLOADING)
@@ -338,18 +435,27 @@ class DownloadManager(
                         val stagingDir = staged.value[id]?.stagingDir ?: ""
                         val result = finalize(snapshot, stagingDir)
                         when {
-                            result.isSuccess ->
-                                mutateIf(id, guard = { it.state == DownloadState.FINALIZING }) {
-                                    it.copy(state = DownloadState.DONE, outputNote = result.getOrNull())
+                            result.isSuccess -> {
+                                val done =
+                                    mutateIf(id, guard = { it.state == DownloadState.FINALIZING }) {
+                                        it.copy(state = DownloadState.DONE, outputNote = result.getOrNull())
+                                    }
+                                if (done) {
+                                    scope.launch { teardownEngine(id) }
+                                    persistQueue()
                                 }
+                            }
 
-                            else ->
-                                mutateIf(id, guard = { it.state == DownloadState.FINALIZING }) {
-                                    it.copy(
-                                        state = DownloadState.FAILED,
-                                        error = result.exceptionOrNull()?.message,
-                                    )
-                                }
+                            else -> {
+                                val failed =
+                                    mutateIf(id, guard = { it.state == DownloadState.FINALIZING }) {
+                                        it.copy(
+                                            state = DownloadState.FAILED,
+                                            error = result.exceptionOrNull()?.message,
+                                        )
+                                    }
+                                if (failed) persistQueue()
+                            }
                         }
                         pump()
                     }
@@ -360,7 +466,51 @@ class DownloadManager(
                 val failed = mutateIf(event.id, guard = { it.state in activeStates }) {
                     it.copy(state = DownloadState.FAILED, error = event.message)
                 }
-                if (failed) pump()
+                if (failed) {
+                    pump()
+                    persistQueue()
+                }
+            }
+        }
+    }
+
+    /**
+     * Fire-and-forget engine teardown of a terminal item's torrent — the handle is dead
+     * weight (piece cache, announce timer) once the payload is finalized or abandoned.
+     * The id may have been re-taken meanwhile (retry enqueue / addFiles' DONE-restart),
+     * so cancel only while the item is still terminal: engine.start removes any prior
+     * torrent with the id, so cancel-before-start is harmless, but cancel-after-start
+     * would kill the fresh round.
+     */
+    private fun teardownEngine(id: String) {
+        val state = _items.value.firstOrNull { it.request.id == id }?.state ?: return
+        if (state in terminalStates) engine.cancel(id)
+    }
+
+    /** Non-terminal items with their staged start; terminal items need no resume. */
+    private fun snapshotForStore(): List<PersistedDownload> {
+        val stagedNow = staged.value
+        return _items.value.mapNotNull { item ->
+            if (item.state in terminalStates) return@mapNotNull null
+            val start = stagedNow[item.request.id] ?: return@mapNotNull null
+            PersistedDownload(
+                id = item.request.id,
+                topicId = item.request.topicId,
+                title = item.request.title,
+                forumName = item.request.forumName,
+                torrentBytesBase64 = Base64.encode(start.torrentBytes),
+                stagingPath = start.stagingDir,
+                wantedFiles = start.wantedFiles.sorted(),
+            )
+        }
+    }
+
+    /** Fire-and-forget store flush, serialized by [persistenceMutex]; failures swallowed. */
+    private fun persistQueue() {
+        val store = persistence ?: return
+        scope.launch {
+            persistenceMutex.withLock {
+                runCatching { store.save(snapshotForStore()) }
             }
         }
     }
@@ -383,5 +533,11 @@ class DownloadManager(
             }
         }
         return applied
+    }
+
+    private companion object {
+        const val DEFAULT_MAX_CONCURRENT = 3
+        const val MIN_CONCURRENT = 1
+        const val MAX_CONCURRENT = 5
     }
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.util.Log
+import com.surgemusic.app.downloads.AndroidQueuePersistence
 import com.surgemusic.app.downloads.DownloadService
 import com.surgemusic.app.downloads.MediaStoreCleaner
 import com.surgemusic.app.downloads.MediaStoreFinalizer
@@ -102,12 +103,16 @@ object AppContainer {
     /**
      * Download queue (Task 8 wiring): the finalize hook moves a finished torrent's staged
      * files into `Music/SurgeMedia/` / `Movies/SurgeMedia/` — or the user's chosen
-     * folders — via [MediaStoreFinalizer] (spec §6, scoped storage).
+     * folders — via [MediaStoreFinalizer] (spec §6, scoped storage). `maxConcurrent` is
+     * the live settings flow, so the concurrent-downloads slider takes effect without an
+     * app restart; queue persistence survives app restarts
+     * (`filesDir/queue.json` via [AndroidQueuePersistence]).
      */
     val downloadManager: DownloadManager by lazy {
         DownloadManager(
             engine = engine,
-            maxConcurrent = settings.concurrentDownloads.value,
+            maxConcurrent = settings.concurrentDownloads,
+            persistence = AndroidQueuePersistence(appContext),
             finalize = { item, staging -> MediaStoreFinalizer(appContext, settings).finalize(item, staging) },
         )
     }
