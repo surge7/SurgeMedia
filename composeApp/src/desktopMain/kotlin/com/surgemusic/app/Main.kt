@@ -10,6 +10,12 @@ import androidx.compose.ui.window.rememberWindowState
 import androidx.compose.runtime.LaunchedEffect
 import com.surgemusic.app.ui.login.DesktopLoginScreen
 import kotlinx.coroutines.delay
+import java.nio.channels.FileChannel
+import java.nio.channels.FileLock
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardOpenOption
+import java.time.Instant
 
 /**
  * Compose Desktop entry point (plan Tasks 5/6): the themed window hosts the real [App]
@@ -27,8 +33,20 @@ import kotlinx.coroutines.delay
  * it in the theme colours via DWM (dark-mode flag on Windows 10) — same visual contract,
  * platform-native mechanics. The title-bar height stays 0: Windows insets the content
  * itself, like every non-macOS platform.
+ *
+ * Startup hardening: a second launch exits early (process-lifetime FileLock on
+ * `~/.surgemusic/app.lock`, see [acquireSingleInstanceLock]) and uncaught exceptions on
+ * any thread are appended to `~/.surgemusic/crash.log` (see [installCrashLog]).
  */
 fun main() {
+    // One instance at a time, before any window/AWT exists. A second launch prints a
+    // line and exits; the lock needs no stale-file cleanup (the OS releases it on
+    // crash/kill) because it lives for the whole process lifetime.
+    if (!acquireSingleInstanceLock()) return
+
+    // Crash log first, so even a startup crash leaves a timestamped trace on disk.
+    installCrashLog()
+
     // AWT reads the application appearance once, while the toolkit starts, so it has to be
     // set before any window exists. "system" makes the native chrome — and the native menu
     // bar — follow the OS appearance instead of being pinned to Aqua. (macOS-only property.)
@@ -100,3 +118,69 @@ fun main() {
         }
     }
 }
+
+/**
+ * Single instance: `tryLock` on `~/.surgemusic/app.lock` — non-blocking, so a second
+ * launch fails fast with a printed line. The channel and lock are pinned in
+ * [InstanceLock] for the process lifetime (an unreferenced FileLock can be finalized
+ * away, which would silently re-allow a second instance). Returns false when another
+ * instance holds the lock; true when this instance owns it — or when the lock file
+ * cannot be created at all (an infra failure must not make the app unlaunchable).
+ */
+private fun acquireSingleInstanceLock(): Boolean {
+    val lockFile = Path.of(System.getProperty("user.home"), APP_STATE_DIR, "app.lock")
+    val channel = runCatching {
+        Files.createDirectories(lockFile.parent)
+        FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+    }.getOrNull() ?: return true
+    val lock = runCatching { channel.tryLock() }.getOrNull()
+    if (lock == null) {
+        runCatching { channel.close() }
+        println("Surge Media is already running — closing this launch.")
+        return false
+    }
+    InstanceLock.channel = channel
+    InstanceLock.lock = lock
+    return true
+}
+
+/** Pins the single-instance FileLock so neither GC nor finalization can release it mid-run. */
+private object InstanceLock {
+    var channel: FileChannel? = null
+    var lock: FileLock? = null
+}
+
+/**
+ * Crash log: appends one timestamped entry per uncaught exception — thread, exception
+ * chain and stack — to `~/.surgemusic/crash.log`, then defers to the previous default
+ * handler so console behaviour (stderr stack trace, exit code) is unchanged. The write
+ * is best-effort: a logging failure must never mask the original crash.
+ */
+private fun installCrashLog() {
+    val logFile = Path.of(System.getProperty("user.home"), APP_STATE_DIR, "crash.log")
+    val previous = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+        runCatching {
+            Files.createDirectories(logFile.parent)
+            Files.writeString(
+                logFile,
+                buildString {
+                    appendLine("${Instant.now()} [${thread.name}] $throwable")
+                    var cause: Throwable? = throwable
+                    while (cause != null) {
+                        for (frame in cause.stackTrace) appendLine("    at $frame")
+                        cause = cause.cause
+                        if (cause != null) appendLine("Caused by: $cause")
+                    }
+                    appendLine()
+                },
+                StandardOpenOption.CREATE,
+                StandardOpenOption.APPEND,
+            )
+        }
+        previous?.uncaughtException(thread, throwable)
+    }
+}
+
+/** State directory under the user home (the session/settings stores live here too). */
+private const val APP_STATE_DIR = ".surgemusic"

@@ -4,6 +4,7 @@ import com.surgemusic.app.AppLanguage
 import com.surgemusic.app.ThemeMode
 import com.surgemusic.app.VideoLibraryParent
 import com.surgemusic.app.appLanguageOf
+import com.surgemusic.app.io.storeAtomicPrivate
 import com.surgemusic.app.themeModeOf
 import com.surgemusic.app.ui.settings.AppSettings
 import java.nio.file.Files
@@ -148,8 +149,9 @@ class DesktopSettingsStore(
     private fun flushAsync(snapshot: Properties) {
         persistScope.launch {
             runCatching {
-                Files.createDirectories(propsFile.parent)
-                Files.newOutputStream(propsFile).use { snapshot.store(it, null) }
+                // Temp file + atomic move + POSIX 0600 (see [storeAtomicPrivate]) — no
+                // torn intermediate file, private perms on every store-created file.
+                snapshot.storeAtomicPrivate(propsFile)
             } // failed flush is swallowed, like SharedPreferences.apply()
         }
     }

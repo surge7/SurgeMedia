@@ -1,5 +1,6 @@
 package com.surgemusic.app.session
 
+import com.surgemusic.app.io.storeAtomicPrivate
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Properties
@@ -23,7 +24,9 @@ import kotlinx.coroutines.launch
  * `apply()`, off the calling thread): `save`/`clear` update the [StateFlow] synchronously
  * and flush the file FIFO on the single-threaded daemon [persistScope] — no file IO
  * on the UI (AWT EDT) thread, last write wins on disk, a failed flush is swallowed like
- * `apply()`.
+ * `apply()`. Flushes are atomic (temp file + rename) and the file is created 0600 — the
+ * bb_session cookie is stored in plaintext, so private perms are the accepted scope
+ * (a keystore/vault migration stays out of scope for desktop v1).
  */
 class FileSessionStore(
     private val homeDir: Path = Path.of(System.getProperty("user.home")),
@@ -49,8 +52,10 @@ class FileSessionStore(
         _session.value = Session(cookieHeader, userAgent, savedAt)
         persistScope.launch {
             runCatching {
-                Files.createDirectories(propsFile.parent)
-                Files.newOutputStream(propsFile).use { props.store(it, null) }
+                // Temp file + atomic move + POSIX 0600 (see [storeAtomicPrivate]): the
+                // file carries the bb_session cookie in plaintext, so private perms from
+                // birth and no torn intermediate state both matter.
+                props.storeAtomicPrivate(propsFile)
             } // failed flush is swallowed, like SharedPreferences.apply()
         }
     }

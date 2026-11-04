@@ -26,9 +26,10 @@ class DesktopSettingsStoreTest {
             store.setLanguage(AppLanguage.ENGLISH)
             assertEquals(AppLanguage.ENGLISH, store.language.value)
 
-            // Async flush: poll a fresh instance over the same home until the write lands.
+            // Async flush: poll a fresh instance over the same home until the write lands
+            // (15s — slow CI disks).
             var reloaded: DesktopSettingsStore
-            val deadline = System.currentTimeMillis() + 5_000
+            val deadline = System.currentTimeMillis() + 15_000
             do {
                 reloaded = DesktopSettingsStore(home)
                 if (reloaded.language.value == AppLanguage.ENGLISH) break

@@ -35,6 +35,7 @@ import com.surgemusic.app.ui.components.SurgeSectionHeader
 import com.surgemusic.app.ui.components.SurgeTextField
 import com.surgemusic.app.ui.components.SurgeTextButton
 import com.surgemusic.app.ui.strings.LocalStrings
+import com.surgemusic.core.model.SearchQuery
 import com.surgemusic.core.tracker.jvm.RutrackerClient
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -51,8 +52,9 @@ import kotlinx.coroutines.launch
  *    ([AppContainer.sessionStore] / [AppContainer.validateSession]) and exits via
  *    [onFinished]. This is the desktop twin of androidMain's WebViewLoginScreen.
  * 2. **Manual import** (fallback for Safari/Firefox): paste the raw Cookie header +
- *    User-Agent (see docs/LOGIN.md) — the original flow, unchanged: SAVE persists,
- *    validates, and exits only when the probe passes.
+ *    User-Agent (see docs/LOGIN.md) — SAVE validates through the probe first (a test
+ *    search against the pasted session imported into the live tracker client) and only
+ *    persists + exits when it passes, so a bogus paste is never written to disk.
  *
  * CANCEL cancels any in-flight browser capture (which also closes the browser window)
  * and exits. The login URL follows the configured mirror, same as the tracker client.
@@ -220,10 +222,22 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                             onClick = {
                                 manualChecking = true
                                 manualError = null
-                                AppContainer.sessionStore.save(cookieHeader.trim(), userAgent.trim())
                                 scope.launch {
-                                    AppContainer.validateSession().fold(
-                                        onSuccess = { onFinished() },
+                                    // Validate BEFORE saving: the pasted header is imported into
+                                    // the live tracker client and probed with a test search — the
+                                    // store is written only on success, so a bogus cookie never
+                                    // lands in session.properties (the old save-first order left
+                                    // the app "logged in" until the next search failed).
+                                    // AppContainer.validateSession() can't be reused here: it
+                                    // re-imports the (possibly stale/absent) store session over
+                                    // the pasted values before probing.
+                                    val client = AppContainer.trackerClient()
+                                    client.importSession(cookieHeader.trim(), userAgent.trim())
+                                    client.search(SearchQuery(text = "test")).fold(
+                                        onSuccess = {
+                                            AppContainer.sessionStore.save(cookieHeader.trim(), userAgent.trim())
+                                            onFinished()
+                                        },
                                         onFailure = { e ->
                                             manualChecking = false
                                             manualError = e.message ?: e::class.simpleName

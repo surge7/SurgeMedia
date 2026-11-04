@@ -1,6 +1,7 @@
 package com.surgemusic.app.login
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -116,6 +117,11 @@ object BrowserLoginCapture {
      * [optionalGrace] for [optionalCookie] (`cf_clearance`) too — capture proceeds
      * without it after the grace window, validation decides if it was needed.
      * [extraArgs] lets tests run `--headless=new`; the real flow opens a visible window.
+     *
+     * Debug port: the browser starts with `--remote-debugging-port=0` — Chrome binds a
+     * free port itself (no `freePort()` bind race) and writes the port it picked to
+     * `<profileDir>/DevToolsActivePort` (first line). We poll that file for a while;
+     * browsers that never write it fall back to the old fixed-port launch.
      */
     suspend fun capture(
         browser: Path,
@@ -129,34 +135,24 @@ object BrowserLoginCapture {
     ): Result = withContext(Dispatchers.IO) {
         val host = runCatching { URI(loginUrl).host }.getOrNull()
             ?: return@withContext Result.Error("cannot parse host from $loginUrl")
-        val port = freePort()
         val profile = Files.createTempDirectory("surgemusic-login")
         val client = OkHttpClient.Builder()
             .connectTimeout(3, TimeUnit.SECONDS)
             .readTimeout(5, TimeUnit.SECONDS)
             .build()
-        val args = buildList {
-            add(browser.toString())
-            add("--remote-debugging-port=$port")
-            add("--user-data-dir=$profile")
-            add("--no-first-run")
-            add("--no-default-browser-check")
-            add("--window-size=1100,800")
-            addAll(extraArgs)
-            add(loginUrl)
-        }
-        onStatus("launching")
-        val process = try {
-            ProcessBuilder(args)
-                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                .redirectErrorStream(true)
-                .start()
-        } catch (e: IOException) {
-            deleteQuietly(profile)
-            return@withContext Result.Error(e.message ?: "failed to launch ${browser.fileName}")
-        }
-
+        var process: Process? = null
         try {
+            onStatus("launching")
+            var current = launchBrowser(browser, loginUrl, profile, extraArgs, debugPort = 0)
+            process = current
+            val port = awaitDevtoolsPort(profile, Duration.ofSeconds(15)) ?: run {
+                // Browser never wrote DevToolsActivePort — relaunch the old way, on a fixed port.
+                stopProcess(current)
+                val fixedPort = freePort()
+                current = launchBrowser(browser, loginUrl, profile, extraArgs, debugPort = fixedPort)
+                process = current
+                fixedPort
+            }
             val userAgent = awaitDevtoolsUserAgent(client, port, Duration.ofSeconds(25))
                 ?: return@withContext Result.Error("browser did not open a debug port (crashed?)")
             onStatus("waiting for login")
@@ -164,7 +160,7 @@ object BrowserLoginCapture {
             var requiredSeenAt = 0L
             while (System.nanoTime() < deadline) {
                 coroutineContext.ensureActive()
-                if (!process.isAlive) return@withContext Result.BrowserClosed
+                if (!current.isAlive) return@withContext Result.BrowserClosed
                 val cookies = pageWebSocketUrl(client, port)?.let { fetchCookies(client, it) }.orEmpty()
                 val header = assembleCookieHeader(cookies, host)
                 val hasRequired = cookies.any { it.name == requiredCookie && domainMatches(it.domain, host) }
@@ -180,16 +176,68 @@ object BrowserLoginCapture {
                 delay(1_500)
             }
             Result.Error("timed out waiting for $requiredCookie cookie")
+        } catch (e: IOException) {
+            Result.Error(e.message ?: "failed to launch ${browser.fileName}")
         } finally {
-            runCatching { process.destroy() }
-            val killDeadline = System.nanoTime() + 2_000_000_000L
-            while (process.isAlive && System.nanoTime() < killDeadline) {
-                runCatching { delay(100) }
+            // NonCancellable: on CANCEL the coroutine is already cancelled when the
+            // finally runs, so the delays below would throw on the spot — skipping both
+            // the graceful-kill wait and the cookie-bearing temp profile deletion.
+            withContext(NonCancellable) {
+                process?.let { stopProcess(it) }
+                client.dispatcher.executorService.shutdown()
+                deleteQuietly(profile)
             }
-            if (process.isAlive) process.destroyForcibly()
-            client.dispatcher.executorService.shutdown()
-            deleteQuietly(profile)
         }
+    }
+
+    /** Starts [browser] on [loginUrl] in the throwaway [profile]; only IOException escapes. */
+    private fun launchBrowser(
+        browser: Path,
+        loginUrl: String,
+        profile: Path,
+        extraArgs: List<String>,
+        debugPort: Int,
+    ): Process = ProcessBuilder(buildList {
+        add(browser.toString())
+        add("--remote-debugging-port=$debugPort")
+        add("--user-data-dir=$profile")
+        add("--no-first-run")
+        add("--no-default-browser-check")
+        add("--window-size=1100,800")
+        addAll(extraArgs)
+        add(loginUrl)
+    })
+        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+        .redirectErrorStream(true)
+        .start()
+
+    /**
+     * Polls `<profile>/DevToolsActivePort` — written by Chrome once the debug port is
+     * bound; its first line is the port actually picked (second is the browser websocket
+     * path, unused). Null when no usable port shows up within [timeout].
+     */
+    private suspend fun awaitDevtoolsPort(profile: Path, timeout: Duration): Int? {
+        val portFile = profile.resolve("DevToolsActivePort")
+        val deadline = System.nanoTime() + timeout.toNanos()
+        while (System.nanoTime() < deadline) {
+            coroutineContext.ensureActive()
+            val port = runCatching {
+                Files.newBufferedReader(portFile).useLines { lines -> lines.firstOrNull() }
+            }.getOrNull()?.trim()?.toIntOrNull()
+            if (port != null && port > 0) return port
+            delay(200)
+        }
+        return null
+    }
+
+    /** destroy(), up to ~2s of waiting, then destroyForcibly — shared by cleanup and the fallback relaunch. */
+    private suspend fun stopProcess(process: Process) {
+        runCatching { process.destroy() }
+        val killDeadline = System.nanoTime() + 2_000_000_000L
+        while (process.isAlive && System.nanoTime() < killDeadline) {
+            delay(100)
+        }
+        if (process.isAlive) process.destroyForcibly()
     }
 
     /** Chrome only allows the debug port on a non-default profile — poll `/json/version` for it. */
