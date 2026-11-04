@@ -47,6 +47,15 @@ fun main() {
     // Crash log first, so even a startup crash leaves a timestamped trace on disk.
     installCrashLog()
 
+    // OS-language watch: polls every 10s so AppLanguage.SYSTEM follows an OS-language
+    // change live (Locale.setDefault + a tick bump → the shell re-resolves its strings)
+    // instead of needing an app restart. Daemon loop on Dispatchers.IO, stopped from a
+    // shutdown hook so no exit path leaks it. Linux: the environment is fixed for the
+    // process lifetime — only the JVM-default watch applies; a full OS-language change
+    // still needs an app restart there (see DesktopLocaleMonitor).
+    AppContainer.startLocaleMonitor()
+    Runtime.getRuntime().addShutdownHook(Thread { AppContainer.stopLocaleMonitor() })
+
     // AWT reads the application appearance once, while the toolkit starts, so it has to be
     // set before any window exists. "system" makes the native chrome — and the native menu
     // bar — follow the OS appearance instead of being pinned to Aqua. (macOS-only property.)

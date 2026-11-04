@@ -30,6 +30,8 @@ import com.surgemusic.core.tracker.jvm.RutrackerClient
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Manual DI: lazy singletons shared by all screens.
@@ -37,8 +39,15 @@ import kotlinx.coroutines.CompletableDeferred
  * `settings`, `downloadManager` and the search→download pipeline ([download]) are
  * wired (Tasks 5–8).
  */
-object AppContainer {
+actual object AppContainer {
     lateinit var appContext: Context
+
+    /**
+     * OS-language-change tick (see the commonMain expect declaration): static 0 on
+     * android — the OS recreates the process on a language change, so the strings
+     * re-resolve through the restart and no polling is needed.
+     */
+    actual val localeTick: StateFlow<Int> = MutableStateFlow(0)
 
     val engine: TorrentEngine by lazy { JLibTorrentEngine() }
 
