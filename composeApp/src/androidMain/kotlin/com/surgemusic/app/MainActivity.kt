@@ -36,16 +36,15 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Pending Settings ▸ Storage pick (SAF): the container's suspend picker parks a
-     * [CompletableDeferred] here, the launcher resolves it (tree URI string, or null on
-     * cancel) and persists read/write access so later finalize/delete passes keep working
-     * across restarts.
+     * [CompletableDeferred] on [AppContainer.folderPickDeferred] (not here — this activity
+     * can be recreated while the chooser is showing), the launcher resolves it (tree URI
+     * string, or null when the user abandons the picker) and persists read/write access so
+     * later finalize/delete passes keep working across restarts.
      */
-    private var pendingFolderPick: CompletableDeferred<String?>? = null
-
     private val pickFolder =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-            val deferred = pendingFolderPick
-            pendingFolderPick = null
+            val deferred = AppContainer.folderPickDeferred
+            AppContainer.folderPickDeferred = null
             if (deferred == null) return@registerForActivityResult
             val path = uri?.let { u ->
                 runCatching {
@@ -64,11 +63,12 @@ class MainActivity : ComponentActivity() {
         AppContainer.appContext = applicationContext
         AppContainer.startNetworkGate()
         // Settings ▸ Storage folder picker: the system chooser must launch from this
-        // activity, so the container's suspend picker hops over and parks on a deferred.
+        // activity, so the container's suspend picker hops over and parks its deferred
+        // on AppContainer (survives recreation) for the launcher callback to complete.
         AppContainer.folderPicker = {
             withContext(Dispatchers.Main) {
                 CompletableDeferred<String?>().also { deferred ->
-                    pendingFolderPick = deferred
+                    AppContainer.folderPickDeferred = deferred
                     pickFolder.launch(null)
                 }.await()
             }

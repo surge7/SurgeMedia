@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.Handler
+import android.os.HandlerThread
 import com.surgemusic.core.downloads.DownloadItem
 import com.surgemusic.core.downloads.DownloadState
 
@@ -35,6 +37,16 @@ class NetworkGate(
     private val lock = Any()
     private val autoPausedIds = mutableSetOf<String>()
 
+    /** Last default network reported by the callback (null until one arrives); guarded by [lock]. */
+    private var defaultNetwork: Network? = null
+
+    /**
+     * Callbacks dispatch on this thread instead of the default internal Handler: the
+     * pause/resume they trigger touch the download manager and must not run on Main.
+     * Owned for the process lifetime — [NetworkGate] is a process singleton (AppContainer).
+     */
+    private val callbackThread = HandlerThread("NetworkGate").apply { start() }
+
     /**
      * Registers a default-network callback. The first `onCapabilitiesChanged` arrives right
      * after registration, so the current unmetered state is delivered without an extra query.
@@ -44,13 +56,27 @@ class NetworkGate(
         manager.registerDefaultNetworkCallback(
             object : ConnectivityManager.NetworkCallback() {
                 override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                    synchronized(lock) { defaultNetwork = network }
                     onUnmeteredChanged(networkCapabilities.isEffectivelyUnmetered())
                 }
 
                 override fun onLost(network: Network) {
-                    onUnmeteredChanged(false)
+                    // Ordering: onLost(old) can be delivered AFTER onCapabilitiesChanged(new,
+                    // unmetered) — blindly reporting metered here would pause everything and
+                    // nothing would resume it until the next foreground heal. Only the loss
+                    // of the tracked default counts, and even then the replacement default
+                    // may already be unmetered (Wi-Fi → Ethernet), so re-query the active
+                    // network's capabilities before deciding.
+                    synchronized(lock) {
+                        if (network != defaultNetwork) return
+                        defaultNetwork = null
+                    }
+                    val manager = context.getSystemService(ConnectivityManager::class.java)
+                    val caps = manager?.getNetworkCapabilities(manager.activeNetwork)
+                    onUnmeteredChanged(caps?.isEffectivelyUnmetered() ?: false)
                 }
             },
+            Handler(callbackThread.looper),
         )
     }
 
