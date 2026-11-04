@@ -1,3 +1,5 @@
+import org.gradle.api.tasks.testing.Test
+import org.gradle.testretry.TestRetryTaskExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
@@ -6,6 +8,8 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.plugin.compose)
     alias(libs.plugins.compose.multiplatform)
+    // Retry flaky JVM tests (BrowserLoginCaptureTest launches a real Chromium).
+    alias(libs.plugins.test.retry)
 }
 
 kotlin {
@@ -63,6 +67,13 @@ kotlin {
         }
     }
     jvmToolchain(21)
+}
+
+// Retry the real-Chromium jvmTest (BrowserLoginCaptureTest) against CI browser flake.
+// `retry` is the TestRetryTaskExtension the plugin adds to Test tasks; Kotlin DSL has no
+// generated accessor for it, so configure it by type.
+tasks.named<Test>("jvmTest") {
+    extensions.configure<TestRetryTaskExtension> { maxRetries.set(2) }
 }
 
 compose.desktop.application {

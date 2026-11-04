@@ -24,10 +24,17 @@ jobs:
       - uses: actions/setup-java@v6
         with: { distribution: temurin, java-version: "21" }
       - uses: gradle/actions/setup-gradle@v6
-      - run: >
+      # Split from packaging so one native flake doesn't block the MSI/EXE artifact upload.
+      - name: JVM tests
+        run: >
           ./gradlew.bat :core:jvmTest :cli:build :composeApp:jvmTest
-          :composeApp:packageDistributionForCurrentOS
-      - uses: actions/upload-artifact@v7
+      # Runs even when the tests above fail, and the artifact still uploads.
+      - name: Package
+        if: always()
+        run: ./gradlew.bat :composeApp:packageDistributionForCurrentOS
+      - name: Upload installers
+        if: always()
+        uses: actions/upload-artifact@v7
         with:
           name: SurgeMedia-windows-x64
           path: |

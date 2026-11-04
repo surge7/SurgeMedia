@@ -8,11 +8,17 @@ import com.surgemusic.core.model.SizeParser
 import com.surgemusic.core.tracker.TrackerError
 import com.surgemusic.core.tracker.jvm.RutrackerClient
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import java.nio.file.Path
 import kotlin.system.exitProcess
+import kotlin.time.Duration.Companion.minutes
+
+/** Safety net against a stalled torrent: --timeout-minutes, default 30. */
+private const val DEFAULT_TIMEOUT_MINUTES = 30L
 
 fun main(args: Array<String>) = runBlocking {
     when (args.getOrNull(0)?.lowercase()) {
@@ -110,6 +116,11 @@ private suspend fun cmdSearch(query: String) {
 private suspend fun cmdDownload(args: List<String>) {
     val topicId = args.getOrNull(0)?.toLongOrNull() ?: return usage("download requires a numeric topicId")
     val outDir = args.drop(1).option("--out") ?: Path.of(System.getProperty("user.home"), "Music", "SurgeMusic").toString()
+    val timeoutArg = args.drop(1).option("--timeout-minutes")
+    val timeoutMinutes =
+        if (timeoutArg == null) DEFAULT_TIMEOUT_MINUTES
+        else timeoutArg.toLongOrNull() ?: usage("--timeout-minutes must be a positive number of minutes")
+    if (timeoutMinutes <= 0) usage("--timeout-minutes must be a positive number of minutes")
 
     newClient().use { client ->
         openSession(client)
@@ -136,7 +147,12 @@ private suspend fun cmdDownload(args: List<String>) {
                     }
                 }
                 engine.start(id, torrentBytes, outDir)
-                done.await().also { job.cancel() }
+                try {
+                    withTimeout(timeoutMinutes.minutes) { done.await() }
+                } catch (_: TimeoutCancellationException) {
+                    println("\ndownload FAILED: timed out after $timeoutMinutes minutes (pass --timeout-minutes N to allow longer)")
+                    false
+                }.also { job.cancel() }
             }
             result
         } finally {
@@ -177,7 +193,7 @@ private fun usage(error: String?): Nothing {
           surgemusic session                  validate the imported browser session
           surgemusic login                    password login (mirrors without Cloudflare)
           surgemusic search <query>
-          surgemusic download <topicId> [--out DIR]
+          surgemusic download <topicId> [--out DIR] [--timeout-minutes N]
         env: RUTRACKER_COOKIES (+ RUTRACKER_UA), RUTRACKER_USER/RUTRACKER_PASS, RUTRACKER_BASE
         session file: ~/.config/surgemusic/cookies  (line 1: raw Cookie header from a logged-in
                      browser; line 2: that browser's User-Agent; chmod 600)
