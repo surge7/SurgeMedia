@@ -2,6 +2,7 @@ package com.surgemusic.app
 
 import com.surgemusic.app.downloads.DesktopFileCleaner
 import com.surgemusic.app.downloads.DesktopFinalizer
+import com.surgemusic.app.downloads.DesktopQueuePersistence
 import com.surgemusic.app.session.FileSessionStore
 import com.surgemusic.app.session.SessionRepository
 import com.surgemusic.app.settings.DesktopSettingsStore
@@ -88,11 +89,15 @@ object AppContainer {
      * active music / video folders (Settings ▸ Storage; built-ins `~/Music/SurgeMedia`
      * and `~/Movies|Videos/SurgeMedia` — macOS `Movies`, Windows/Linux `Videos`) via
      * [DesktopFinalizer] (desktop twin of MediaStoreFinalizer, spec §6 without MediaStore).
+     * `maxConcurrent` is the live settings flow, so the concurrent-downloads slider takes
+     * effect without an app restart; queue persistence survives app restarts
+     * (`~/.surgemusic/queue.json` via [DesktopQueuePersistence]).
      */
     val downloadManager: DownloadManager by lazy {
         DownloadManager(
             engine = engine,
-            maxConcurrent = settings.concurrentDownloads.value,
+            maxConcurrent = settings.concurrentDownloads,
+            persistence = DesktopQueuePersistence(),
             finalize = { item, staging -> DesktopFinalizer(settings).finalize(item, staging) },
         )
     }

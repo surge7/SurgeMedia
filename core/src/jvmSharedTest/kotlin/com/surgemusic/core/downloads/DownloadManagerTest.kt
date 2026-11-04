@@ -2,8 +2,10 @@ package com.surgemusic.core.downloads
 
 import com.surgemusic.core.engine.EngineEvent
 import com.surgemusic.core.engine.TorrentFileInfo
+import kotlin.io.encoding.Base64
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -60,7 +62,7 @@ class DownloadManagerTest {
     @Test
     fun enqueuedItemStartsWhenSlotFree() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
 
         manager.enqueue(request("t-1"), torrent, "/staging/t-1")
@@ -76,7 +78,7 @@ class DownloadManagerTest {
     @Test
     fun wantedFileSelectionIsForwardedToEngineStart() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
 
         manager.enqueue(request("t-1"), torrent, "/staging/t-1", wantedFileIndices = setOf(0, 2))
@@ -95,7 +97,7 @@ class DownloadManagerTest {
     @Test
     fun concurrencyLimitHoldsAtMaxConcurrent() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
 
         repeat(5) { manager.enqueue(request("t-$it"), torrent, "/staging/t-$it") }
@@ -116,7 +118,7 @@ class DownloadManagerTest {
     @Test
     fun progressEventUpdatesItem() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         manager.enqueue(request("t-1", sizeBytes = 1_000), torrent, "/staging/t-1")
 
@@ -135,7 +137,7 @@ class DownloadManagerTest {
         val engine = FakeEngine()
         val finalizeGate = CompletableDeferred<Unit>()
         val finalizeArgs = CompletableDeferred<Pair<DownloadItem, String>>()
-        val manager = DownloadManager(engine, 3) { item, staging ->
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { item, staging ->
             finalizeArgs.complete(item to staging)
             finalizeGate.await()
             Result.success("2 files → Music/SurgeMusic/Artist - Album")
@@ -154,6 +156,9 @@ class DownloadManagerTest {
         val done = awaitItem(manager, "t-1") { it.state == DownloadState.DONE }
         assertEquals("2 files → Music/SurgeMusic/Artist - Album", done.outputNote)
         assertNull(done.error)
+        // the finished engine torrent is torn down fire-and-forget (fix: dead handle
+        // cleanup) — poll, it runs on the manager scope
+        withTimeout(5_000) { while (!engine.cancelled.value.contains("t-1")) delay(10) }
     }
 
     @Test
@@ -161,7 +166,7 @@ class DownloadManagerTest {
         val engine = FakeEngine()
         val finalizeGate = CompletableDeferred<Unit>()
         val finalizeStarted = CompletableDeferred<Unit>()
-        val manager = DownloadManager(engine, 2) { _, _ ->
+        val manager = DownloadManager(engine, MutableStateFlow(2)) { _, _ ->
             finalizeStarted.complete(Unit)
             finalizeGate.await()
             Result.success("ok")
@@ -188,7 +193,7 @@ class DownloadManagerTest {
     @Test
     fun finalizeFailureMarksFailed() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 3) { _, _ ->
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ ->
             Result.failure(IllegalStateException("mediastore insert failed"))
         }
         engine.awaitSubscribed()
@@ -204,7 +209,7 @@ class DownloadManagerTest {
     @Test
     fun failedEventMarksItemFailed(): Unit = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 1) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(1)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         manager.enqueue(request("t-1"), torrent, "/staging/t-1")
         manager.enqueue(request("t-2"), torrent, "/staging/t-2") // QUEUED while t-1 downloads
@@ -221,7 +226,7 @@ class DownloadManagerTest {
     @Test
     fun cancelFreesSlotForNextQueued() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         repeat(3) { manager.enqueue(request("t-$it"), torrent, "/staging/t-$it") }
         manager.enqueue(request("t-3"), torrent, "/staging/t-3")
@@ -239,7 +244,7 @@ class DownloadManagerTest {
     @Test
     fun pausePauseAllTransitions() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 2) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(2)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         manager.enqueue(request("t-a"), torrent, "/staging/t-a")
         manager.enqueue(request("t-b"), torrent, "/staging/t-b")
@@ -266,7 +271,7 @@ class DownloadManagerTest {
     @Test
     fun duplicateEnqueueWhileInFlightIsIgnored() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         manager.enqueue(request("t-1"), torrent, "/staging/t-1")
         manager.enqueue(request("t-1"), torrent, "/staging/t-1") // second tap while DOWNLOADING
@@ -279,7 +284,7 @@ class DownloadManagerTest {
     @Test
     fun reEnqueueAfterFailureResetsItemAndRestarts() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         manager.enqueue(request("t-1"), torrent, "/staging/t-1")
         assertTrue(engine.events.tryEmit(EngineEvent.Failed("t-1", "tracker dead")))
@@ -295,7 +300,7 @@ class DownloadManagerTest {
     @Test
     fun throwingEngineStartFailsItemInsteadOfCrashingCaller() = runBlocking {
         val engine = FakeEngine().apply { throwOnStart = IllegalStateException("bad torrent bytes") }
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
 
         manager.enqueue(request("t-1"), torrent, "/staging/t-1")
@@ -307,7 +312,7 @@ class DownloadManagerTest {
     @Test
     fun removeDoneItemDropsItAndKeepsOthers() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         manager.enqueue(request("t-a"), torrent, "/staging/t-a")
         manager.enqueue(request("t-b"), torrent, "/staging/t-b")
@@ -320,13 +325,15 @@ class DownloadManagerTest {
 
         assertEquals(listOf("t-b"), manager.items.value.map { it.request.id })
         assertEquals(DownloadState.DONE, item(manager, "t-b").state)
-        assertTrue(engine.cancelled.value.isEmpty(), "removing a terminal item must not cancel anything")
+        // remove() tears down the dropped DONE item's engine torrent synchronously
+        // (t-b's own fire-and-forget DONE teardown may cancel it too — expected now)
+        assertTrue(engine.cancelled.value.contains("t-a"), "removing a terminal item tears down its engine torrent")
     }
 
     @Test
     fun removeDownloadingItemCancelsItAndDropsIt() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         manager.enqueue(request("t-1"), torrent, "/staging/t-1")
         awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
@@ -340,7 +347,7 @@ class DownloadManagerTest {
     @Test
     fun clearCompletedKeepsActiveAndDropsTerminalItems() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 2) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(2)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         // a, b take the 2 slots; c, d, e stay QUEUED
         listOf("t-a", "t-b", "t-c", "t-d", "t-e").forEach { manager.enqueue(request(it), torrent, "/staging/$it") }
@@ -358,13 +365,18 @@ class DownloadManagerTest {
         val after = manager.items.value
         assertEquals(setOf("t-c", "t-d"), after.map { it.request.id }.toSet())
         assertTrue(after.all { it.state == DownloadState.DOWNLOADING }, "active items must survive: ${after.map { it.state }}")
-        assertTrue(engine.cancelled.value.contains("t-e") && !engine.cancelled.value.contains("t-c"))
+        // terminal items' engine torrents are torn down too; the active pair is untouched
+        assertTrue(
+            engine.cancelled.value.toSet().containsAll(setOf("t-a", "t-b", "t-e")),
+            "terminal items must be cancelled: ${engine.cancelled.value}",
+        )
+        assertTrue(!engine.cancelled.value.contains("t-c") && !engine.cancelled.value.contains("t-d"))
     }
 
     @Test
     fun removeUnknownIdIsNoOp() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         manager.enqueue(request("t-1"), torrent, "/staging/t-1")
         awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
@@ -389,7 +401,7 @@ class DownloadManagerTest {
     @Test
     fun stagedFilesAndWantedSetAreExposedAfterEnqueue() = runBlocking {
         val engine = FakeEngine().apply { files = fourFiles }
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         manager.enqueue(request("t-1"), torrent, "/staging/t-1", wantedFileIndices = setOf(0, 2))
 
@@ -402,7 +414,7 @@ class DownloadManagerTest {
     @Test
     fun addFilesOnDownloadingMergesAndRepointsEnginePriorities() = runBlocking {
         val engine = FakeEngine().apply { files = fourFiles }
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         manager.enqueue(request("t-1", sizeBytes = 500), torrent, "/staging/t-1", wantedFileIndices = setOf(0, 2))
         awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
@@ -420,7 +432,7 @@ class DownloadManagerTest {
     @Test
     fun addFilesOnDoneRestartsWantingOnlyNewFiles() = runBlocking {
         val engine = FakeEngine().apply { files = fourFiles }
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         manager.enqueue(request("t-1", sizeBytes = 100), torrent, "/staging/t-1", wantedFileIndices = setOf(0))
         awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
@@ -441,7 +453,7 @@ class DownloadManagerTest {
     @Test
     fun addFilesNoopsWhenEverythingIsAlreadyWanted() = runBlocking {
         val engine = FakeEngine().apply { files = fourFiles }
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         // explicit full selection
         manager.enqueue(request("t-1"), torrent, "/staging/t-1", wantedFileIndices = setOf(0, 1, 2, 3))
@@ -459,7 +471,7 @@ class DownloadManagerTest {
     @Test
     fun addFilesNoopsOnUnknownIdAndUnextensibleStates() = runBlocking {
         val engine = FakeEngine()
-        val manager = DownloadManager(engine, 3) { _, _ -> Result.success("ok") }
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
         engine.awaitSubscribed()
         assertFalse(manager.addFiles("nope", setOf(0)))
         manager.enqueue(request("t-1"), torrent, "/staging/t-1", wantedFileIndices = setOf(0))
@@ -471,4 +483,89 @@ class DownloadManagerTest {
         assertTrue(engine.priorityUpdates.value.isEmpty())
         assertEquals(1, engine.started.value.size)
     }
+
+    // ── Queue persistence (crash/exit recovery) ──────────────────────────────────────
+
+    @Test
+    fun persistenceRestoresNonTerminalEntriesAsQueued() = runBlocking {
+        val engine = FakeEngine()
+        val store = FakeQueuePersistence(
+            loaded = listOf(
+                PersistedDownload("t-1", 6918211L, "A", "Rock", Base64.encode(torrent), "/staging/t-1", listOf(0)),
+                // no torrent bytes → nothing for the engine to restart on → dropped
+                PersistedDownload("t-2", 6918212L, "B", "Pop", null, "/staging/t-2", emptyList()),
+            ),
+        )
+        val manager = DownloadManager(engine, MutableStateFlow(3), store) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+
+        awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+
+        assertEquals(listOf("t-1"), manager.items.value.map { it.request.id })
+        val call = engine.started.value.single()
+        assertEquals("t-1", call.id)
+        assertEquals("/staging/t-1", call.targetDir)
+        assertEquals(setOf(0), call.wantedFiles)
+        assertContentEquals(torrent, call.torrentBytes)
+        assertEquals(setOf(0), manager.wantedFiles("t-1"))
+    }
+
+    @Test
+    fun persistenceSavesOnEnqueueAndTerminalTransitions() = runBlocking {
+        val engine = FakeEngine()
+        val store = FakeQueuePersistence()
+        val manager = DownloadManager(engine, MutableStateFlow(3), store) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1")
+        awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+        withTimeout(5_000) { while (store.saves.value.isEmpty()) delay(10) }
+        assertEquals(
+            listOf("t-1"),
+            store.saves.value.last().map { it.id },
+            "enqueue must flush the queue",
+        )
+        assertEquals("/staging/t-1", store.saves.value.last().single().stagingPath)
+
+        // terminal transition (DONE): the item leaves the persisted queue (nothing to resume)
+        assertTrue(engine.events.tryEmit(EngineEvent.Completed("t-1")))
+        awaitItem(manager, "t-1") { it.state == DownloadState.DONE }
+        withTimeout(5_000) { while (store.saves.value.last().containsPersisted("t-1")) delay(10) }
+        assertTrue(store.saves.value.last().isEmpty(), "terminal item must drop out: ${store.saves.value.last()}")
+    }
+
+    @Test
+    fun corruptedOrEmptyStoreStartsClean() = runBlocking {
+        val engine = FakeEngine()
+        val manager =
+            DownloadManager(engine, MutableStateFlow(3), FakeQueuePersistence(loadThrows = true)) { _, _ ->
+                Result.success("ok")
+            }
+        engine.awaitSubscribed()
+
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1")
+
+        awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+        assertEquals(listOf("t-1"), manager.items.value.map { it.request.id })
+        assertEquals(1, engine.started.value.size)
+    }
 }
+
+/** Records save calls; [loaded] scripts load (a throw simulates a corrupt store). */
+private class FakeQueuePersistence(
+    private val loaded: List<PersistedDownload> = emptyList(),
+    private val loadThrows: Boolean = false,
+) : QueuePersistence {
+    val saves = MutableStateFlow<List<List<PersistedDownload>>>(emptyList())
+
+    override suspend fun load(): List<PersistedDownload> {
+        if (loadThrows) throw IllegalStateException("corrupt queue.json")
+        return loaded
+    }
+
+    override suspend fun save(items: List<PersistedDownload>) {
+        saves.value += listOf(items)
+    }
+}
+
+private fun List<PersistedDownload>.containsPersisted(id: String): Boolean = any { it.id == id }

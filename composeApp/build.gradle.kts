@@ -47,6 +47,8 @@ kotlin {
             // SAF folder destinations (Settings ▸ Storage): writing/listing/deleting in
             // user-chosen trees via DocumentFile.
             implementation(libs.androidx.documentfile)
+            // QueuePersistence JSON codec (desktopMain already carries it)
+            implementation(libs.kotlinx.serialization.json)
         }
         androidUnitTest.dependencies {
             implementation(libs.kotlin.test)
