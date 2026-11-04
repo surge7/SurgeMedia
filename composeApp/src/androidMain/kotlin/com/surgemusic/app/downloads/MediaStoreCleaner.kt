@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.BaseColumns
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
+import com.surgemusic.app.settings.SettingKeys
 import com.surgemusic.app.settings.SettingsStore
 import com.surgemusic.core.downloads.DownloadItem
 import kotlinx.coroutines.Dispatchers
@@ -181,11 +182,11 @@ class MediaStoreCleaner(
     }
 
     private companion object {
-        const val ROOT_AUDIO = "Music/SurgeMedia/"
-        const val ROOT_IMAGES = "Pictures/SurgeMedia/"
-        const val ROOT_VIDEO = "Movies/SurgeMedia/"
-        const val LEGACY_AUDIO = "Music/SurgeMusic/" // pre-rebrand builds
-        const val LEGACY_IMAGES = "Pictures/SurgeMusic/"
-        const val LEGACY_VIDEO = "Movies/SurgeMusic/"
+        const val ROOT_AUDIO = "Music/" + SettingKeys.BRAND_DIR + "/"
+        const val ROOT_IMAGES = "Pictures/" + SettingKeys.BRAND_DIR + "/"
+        const val ROOT_VIDEO = "Movies/" + SettingKeys.BRAND_DIR + "/"
+        const val LEGACY_AUDIO = "Music/" + SettingKeys.BRAND_DIR_LEGACY + "/" // pre-rebrand builds
+        const val LEGACY_IMAGES = "Pictures/" + SettingKeys.BRAND_DIR_LEGACY + "/"
+        const val LEGACY_VIDEO = "Movies/" + SettingKeys.BRAND_DIR_LEGACY + "/"
     }
 }
