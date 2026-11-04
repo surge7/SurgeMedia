@@ -1,3 +1,5 @@
+import org.gradle.api.tasks.testing.Test
+import org.gradle.testretry.TestRetryTaskExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 // Host OS selector for the desktop jlibtorrent native, below. Values: "mac" | "windows" | "linux".
@@ -16,6 +18,8 @@ plugins {
     // @Serializable for PersistedDownload (QueuePersistence); the json runtime is already
     // a commonMain dependency.
     alias(libs.plugins.kotlin.serialization)
+    // Retry flaky JVM tests (EngineSmokeTest drives the real jlibtorrent native).
+    alias(libs.plugins.test.retry)
 }
 
 kotlin {
@@ -74,6 +78,13 @@ kotlin {
         }
     }
     jvmToolchain(21)
+}
+
+// Retry the native-driving jvmTest (EngineSmokeTest) — CI occasionally flakes on the
+// jlibtorrent native. `retry` is the TestRetryTaskExtension the plugin adds to Test tasks;
+// Kotlin DSL has no generated accessor for it, so configure it by type.
+tasks.named<Test>("jvmTest") {
+    extensions.configure<TestRetryTaskExtension> { maxRetries.set(2) }
 }
 
 android {
