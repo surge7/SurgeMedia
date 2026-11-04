@@ -73,7 +73,7 @@ fun main() {
             state = rememberWindowState(
                 width = 1080.dp,
                 height = 720.dp,
-                // CMP 1.8.1 has no Platform.WindowCenter — WindowPosition(Alignment)
+                // CMP 1.12.0 has no Platform.WindowCenter — WindowPosition(Alignment)
                 // is the Aligned variant that centers the window on screen.
                 position = WindowPosition(Alignment.Center),
             ),

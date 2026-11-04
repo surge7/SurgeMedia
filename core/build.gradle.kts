@@ -89,7 +89,7 @@ tasks.named<Test>("jvmTest") {
 
 android {
     namespace = "com.surgemusic.core"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig { minSdk = 29 }
     sourceSets {
         // AGP's unit-test runtime does not consume resources from KMP intermediate

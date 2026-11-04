@@ -6,7 +6,6 @@ import com.surgemusic.app.VideoLibraryParent
 import com.surgemusic.app.appLanguageOf
 import com.surgemusic.app.io.storeAtomicPrivate
 import com.surgemusic.app.themeModeOf
-import com.surgemusic.app.ui.settings.AppSettings
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Properties
@@ -55,10 +54,10 @@ class DesktopSettingsStore(
     private val _concurrentDownloads = MutableStateFlow(readConcurrentDownloads())
     override val concurrentDownloads: StateFlow<Int> = _concurrentDownloads.asStateFlow()
 
-    private val _themeMode = MutableStateFlow(themeModeOf(props.getProperty(KEY_THEME_MODE)))
+    private val _themeMode = MutableStateFlow(themeModeOf(props.getProperty(SettingKeys.THEME_MODE)))
     override val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
-    private val _language = MutableStateFlow(appLanguageOf(props.getProperty(KEY_LANGUAGE)))
+    private val _language = MutableStateFlow(appLanguageOf(props.getProperty(SettingKeys.LANGUAGE)))
     override val language: StateFlow<AppLanguage> = _language.asStateFlow()
 
     private val _musicFolder = MutableStateFlow(readMusicFolder())
@@ -73,7 +72,7 @@ class DesktopSettingsStore(
 
     override fun setWifiOnly(enabled: Boolean) {
         val snapshot = synchronized(ioLock) {
-            props.setProperty(KEY_WIFI_ONLY, enabled.toString())
+            props.setProperty(SettingKeys.WIFI_ONLY, enabled.toString())
             _wifiOnly.value = enabled
             props.clone() as Properties
         }
@@ -82,7 +81,7 @@ class DesktopSettingsStore(
 
     override fun setMirror(url: String) {
         val snapshot = synchronized(ioLock) {
-            props.setProperty(KEY_MIRROR, url)
+            props.setProperty(SettingKeys.MIRROR, url)
             _mirror.value = url
             props.clone() as Properties
         }
@@ -93,7 +92,7 @@ class DesktopSettingsStore(
     override fun setConcurrentDownloads(count: Int) {
         val clamped = count.coerceIn(MIN_CONCURRENT_DOWNLOADS, MAX_CONCURRENT_DOWNLOADS)
         val snapshot = synchronized(ioLock) {
-            props.setProperty(KEY_CONCURRENT_DOWNLOADS, clamped.toString())
+            props.setProperty(SettingKeys.CONCURRENT_DOWNLOADS, clamped.toString())
             _concurrentDownloads.value = clamped
             props.clone() as Properties
         }
@@ -102,7 +101,7 @@ class DesktopSettingsStore(
 
     override fun setThemeMode(mode: ThemeMode) {
         val snapshot = synchronized(ioLock) {
-            props.setProperty(KEY_THEME_MODE, mode.name)
+            props.setProperty(SettingKeys.THEME_MODE, mode.name)
             _themeMode.value = mode
             props.clone() as Properties
         }
@@ -111,7 +110,7 @@ class DesktopSettingsStore(
 
     override fun setLanguage(language: AppLanguage) {
         val snapshot = synchronized(ioLock) {
-            props.setProperty(KEY_LANGUAGE, language.name)
+            props.setProperty(SettingKeys.LANGUAGE, language.name)
             _language.value = language
             props.clone() as Properties
         }
@@ -121,7 +120,7 @@ class DesktopSettingsStore(
     /** Stores the chosen music folder; "" restores the built-in destination. */
     override fun setMusicFolder(path: String) {
         val snapshot = synchronized(ioLock) {
-            props.setProperty(KEY_MUSIC_FOLDER, path)
+            props.setProperty(SettingKeys.MUSIC_FOLDER, path)
             _musicFolder.value = path
             props.clone() as Properties
         }
@@ -131,7 +130,7 @@ class DesktopSettingsStore(
     /** Stores the chosen video folder; "" restores the built-in destination. */
     override fun setVideoFolder(path: String) {
         val snapshot = synchronized(ioLock) {
-            props.setProperty(KEY_VIDEO_FOLDER, path)
+            props.setProperty(SettingKeys.VIDEO_FOLDER, path)
             _videoFolder.value = path
             props.clone() as Properties
         }
@@ -157,30 +156,20 @@ class DesktopSettingsStore(
     }
 
     private fun readWifiOnly(): Boolean =
-        props.getProperty(KEY_WIFI_ONLY)?.toBooleanStrictOrNull() ?: DEFAULT_WIFI_ONLY
+        props.getProperty(SettingKeys.WIFI_ONLY)?.toBooleanStrictOrNull() ?: SettingKeys.DEFAULT_WIFI_ONLY
 
-    private fun readMirror(): String = props.getProperty(KEY_MIRROR) ?: DEFAULT_MIRROR
+    private fun readMirror(): String = props.getProperty(SettingKeys.MIRROR) ?: SettingKeys.DEFAULT_MIRROR
 
     private fun readConcurrentDownloads(): Int =
-        props.getProperty(KEY_CONCURRENT_DOWNLOADS)?.toIntOrNull() ?: DEFAULT_CONCURRENT_DOWNLOADS
+        props.getProperty(SettingKeys.CONCURRENT_DOWNLOADS)?.toIntOrNull() ?: SettingKeys.DEFAULT_CONCURRENT_DOWNLOADS
 
-    private fun readMusicFolder(): String = props.getProperty(KEY_MUSIC_FOLDER) ?: ""
-    private fun readVideoFolder(): String = props.getProperty(KEY_VIDEO_FOLDER) ?: ""
+    private fun readMusicFolder(): String = props.getProperty(SettingKeys.MUSIC_FOLDER) ?: ""
+    private fun readVideoFolder(): String = props.getProperty(SettingKeys.VIDEO_FOLDER) ?: ""
 
     private companion object {
         const val DIR = ".surgemusic"
         const val FILE = "settings.properties"
-        const val KEY_WIFI_ONLY = "wifi_only"
-        const val KEY_MIRROR = "mirror"
-        const val KEY_CONCURRENT_DOWNLOADS = "concurrent_downloads"
-        const val KEY_THEME_MODE = "theme_mode"
-        const val KEY_LANGUAGE = "language"
-        const val KEY_MUSIC_FOLDER = "music_folder"
-        const val KEY_VIDEO_FOLDER = "video_folder"
         const val BRAND_DIR = "SurgeMedia"
-        const val DEFAULT_WIFI_ONLY = true
-        const val DEFAULT_MIRROR = "https://rutracker.org"
-        const val DEFAULT_CONCURRENT_DOWNLOADS = 3
         const val MIN_CONCURRENT_DOWNLOADS = 1
         const val MAX_CONCURRENT_DOWNLOADS = 5
     }

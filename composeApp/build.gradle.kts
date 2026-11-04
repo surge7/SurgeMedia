@@ -78,7 +78,7 @@ tasks.named<Test>("jvmTest") {
 }
 
 compose.desktop.application {
-    // JvmApplication.mainClass is a plain String var in compose-gradle-plugin 1.8.1
+    // JvmApplication.mainClass is a plain String var in compose-gradle-plugin 1.12.0
     // (no Property.set) — assign directly.
     mainClass = "com.surgemusic.app.MainKt"
 
