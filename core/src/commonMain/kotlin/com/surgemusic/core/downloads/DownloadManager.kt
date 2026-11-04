@@ -228,9 +228,10 @@ class DownloadManager(
      * Returns false when there is nothing to do: unknown id, empty selection, every file
      * already wanted, or a state the action cannot extend (QUEUED/FINALIZING/FAILED/
      * CANCELLED). Note the DOWNLOADING branch races a completion happening between the
-     * state read and the engine call — if the torrent completes first, its finalize moved
-     * the old files and the new ones stay unstaged; repeating "add files" (the DONE path)
-     * recovers them.
+     * state read and the merge: an item that raced all the way to DONE no longer drops
+     * the selection — the merge auto-transitions into the DONE restart with the union of
+     * old+new wanted files. Racing only to FINALIZING (or FAILED/CANCELLED) still drops
+     * the new files; repeating "add files" once the item settles recovers them.
      */
     fun addFiles(id: String, newFileIndices: Set<Int>): Boolean {
         if (newFileIndices.isEmpty()) return false
@@ -245,68 +246,95 @@ class DownloadManager(
             DownloadState.DOWNLOADING, DownloadState.PAUSED -> {
                 val union = start.wantedFiles + newFileIndices
                 var applied = false
+                var sawDone = false
                 _items.update { list ->
                     list.map { item ->
-                        if (
-                            item.request.id == id && !applied &&
-                            (item.state == DownloadState.DOWNLOADING || item.state == DownloadState.PAUSED)
-                        ) {
-                            applied = true
-                            val unionBytes = start.files
-                                .filter { it.index in union }
-                                .sumOf { it.sizeBytes }
-                            item.copy(bytesTotal = if (unionBytes > 0) unionBytes else item.bytesTotal)
-                        } else {
+                        if (item.request.id != id) {
                             item
+                        } else {
+                            when (item.state) {
+                                // a CAS retry re-runs this lambda on a fresh snapshot: a
+                                // completion landing mid-merge shows up here as DONE —
+                                // the DONE check must run on every retry so the
+                                // raced-to-DONE fallback below can fire
+                                DownloadState.DONE -> {
+                                    sawDone = true
+                                    item
+                                }
+
+                                DownloadState.DOWNLOADING, DownloadState.PAUSED -> {
+                                    // the union sum is recomputed on every active-state
+                                    // retry (idempotent): it keeps each CAS attempt's span
+                                    // long, so under concurrent list mutations the merge
+                                    // keeps losing the CAS ping-pong instead of committing
+                                    // a snapshot taken before a mid-merge completion
+                                    applied = true
+                                    val unionBytes = start.files
+                                        .filter { it.index in union }
+                                        .sumOf { it.sizeBytes }
+                                    item.copy(bytesTotal = if (unionBytes > 0) unionBytes else item.bytesTotal)
+                                }
+
+                                else -> item
+                            }
                         }
                     }
                 }
-                if (!applied) return false // raced out of DOWNLOADING/PAUSED — nothing to merge
+                // raced out of DOWNLOADING/PAUSED mid-merge and the item is now DONE: its
+                // finalize already moved the old files, so instead of dropping the new
+                // selection the merge degrades into the DONE restart with the union.
+                if (sawDone) return restartDone(id, start, union)
+                if (!applied) return false // raced to FINALIZING/FAILED/CANCELLED — drop
                 staged.update { it + (id to start.copy(wantedFiles = union)) }
                 engine.setWantedFiles(id, union)
                 persistQueue()
                 true
             }
 
-            DownloadState.DONE -> {
-                // staged FIRST: flipping the item to QUEUED before `staged` holds the new
-                // selection would let a concurrent pump start the fresh round with the
-                // previous round's wanted-set.
-                staged.update { it + (id to start.copy(wantedFiles = newFileIndices)) }
-                var restarted = false
-                _items.update { list ->
-                    list.map { item ->
-                        if (item.request.id == id && !restarted && item.state == DownloadState.DONE) {
-                            restarted = true
-                            val newBytes = start.files
-                                .filter { it.index in newFileIndices }
-                                .sumOf { it.sizeBytes }
-                                .takeIf { it > 0 }
-                            DownloadItem(item.request.copy(sizeBytes = newBytes ?: item.request.sizeBytes))
-                        } else {
-                            item
-                        }
-                    }
-                }
-                if (!restarted) {
-                    // raced away from DONE (remove / re-enqueue won): drop the staged
-                    // write unless a live item re-owns the id (its enqueue manages its
-                    // own staged entry).
-                    if (_items.value.none { it.request.id == id }) staged.update { it - id }
-                    return false
-                }
-                // the restart is a new round for the id — bump before the pump's
-                // engine.start so the previous round's pending DONE teardown skips it;
-                // that start serializes against the teardown on the id's mutex inside
-                // the pump, so the teardown can never cancel the fresh round
-                bumpGeneration(id)
-                pump()
-                persistQueue()
-                true
-            }
+            DownloadState.DONE -> restartDone(id, start, newFileIndices)
 
             else -> false
         }
+    }
+
+    /**
+     * The DONE-restart path shared by [addFiles]' DONE branch and its raced-to-DONE
+     * fallback: [wanted] becomes the fresh round's selection. Staged FIRST: flipping the
+     * item to QUEUED before `staged` holds the new selection would let a concurrent pump
+     * start the fresh round with the previous round's wanted-set.
+     */
+    private fun restartDone(id: String, start: StagedStart, wanted: Set<Int>): Boolean {
+        staged.update { it + (id to start.copy(wantedFiles = wanted)) }
+        var restarted = false
+        _items.update { list ->
+            list.map { item ->
+                if (item.request.id == id && !restarted && item.state == DownloadState.DONE) {
+                    restarted = true
+                    val newBytes = start.files
+                        .filter { it.index in wanted }
+                        .sumOf { it.sizeBytes }
+                        .takeIf { it > 0 }
+                    DownloadItem(item.request.copy(sizeBytes = newBytes ?: item.request.sizeBytes))
+                } else {
+                    item
+                }
+            }
+        }
+        if (!restarted) {
+            // raced away from DONE (remove / re-enqueue won): drop the staged
+            // write unless a live item re-owns the id (its enqueue manages its
+            // own staged entry).
+            if (_items.value.none { it.request.id == id }) staged.update { it - id }
+            return false
+        }
+        // the restart is a new round for the id — bump before the pump's
+        // engine.start so the previous round's pending DONE teardown skips it;
+        // that start serializes against the teardown on the id's mutex inside
+        // the pump, so the teardown can never cancel the fresh round
+        bumpGeneration(id)
+        pump()
+        persistQueue()
+        return true
     }
 
     fun pause(id: String) {
@@ -326,12 +354,27 @@ class DownloadManager(
         }
     }
 
+    /**
+     * Cancels [id] (QUEUED/DOWNLOADING/PAUSED → CANCELLED). The state flip commits first
+     * as a plain non-suspending CAS (lock hierarchy: the mutex is acquired only after the
+     * state update commits, never inside an update lambda); the engine teardown then runs
+     * under the id's start/teardown mutex via [cancelEngineUnderLock] — the same lock the
+     * pump holds across its claim-and-[engine.start] span, so either order of
+     * cancel-vs-start yields a correct end state:
+     * - the CAS lands first: the pump's claim guard (QUEUED) then refuses the item — no
+     *   start is ever issued for a CANCELLED id, and engine.cancel is a harmless no-op;
+     * - the pump's claim+start lands first: the CAS still wins (both states are active)
+     *   and the engine.cancel, serialized after the pump releases the mutex, tears the
+     *   started torrent down. Without that serialization a cancel landing between the
+     *   claim and engine.start would no-op against the not-yet-started torrent and leave
+     *   it running behind a CANCELLED item.
+     */
     fun cancel(id: String) {
         val cancelled = mutateIf(id, guard = { it.state in activeStates }) {
             it.copy(state = DownloadState.CANCELLED)
         }
         if (cancelled) {
-            engine.cancel(id)
+            cancelEngineUnderLock(id)
             pump()
             persistQueue()
         }
@@ -354,12 +397,17 @@ class DownloadManager(
 
     /**
      * History removal: drops [id] from the list and from `staged`. An active item is
-     * first cancelled exactly like [cancel] does (state CANCELLED + engine.cancel +
-     * pump) so the engine side is torn down too; terminal items get the same engine
-     * teardown (their torrent handle is dead weight — the fire-and-forget DONE path
-     * may not have run yet, and re-firing cancel is harmless); one still FINALIZING —
-     * its finalize keeps running but the entry is gone — is dropped directly. Unknown
-     * id is a no-op.
+     * first cancelled exactly like [cancel] does (state CANCELLED CAS + engine.cancel
+     * under the id's mutex + pump — the mutex keeps the teardown serialized against a
+     * pump claim-and-start mid-flight, see [cancelEngineUnderLock]) so the engine side
+     * is torn down too; terminal items get the same engine teardown (their torrent
+     * handle is dead weight — the fire-and-forget DONE path may not have run yet, and
+     * re-firing cancel is harmless); one still FINALIZING — its finalize keeps running
+     * but the entry is gone — is dropped directly. The list/staged drops are plain
+     * non-suspending updates committed after the mutex section (lock hierarchy). A
+     * deferred teardown re-checks under the lock and still fires for a dropped id
+     * (nothing re-owns it); a re-enqueued round does re-own it and is left alone.
+     * Unknown id is a no-op.
      */
     fun remove(id: String) {
         val current = _items.value.firstOrNull { it.request.id == id } ?: return
@@ -368,7 +416,7 @@ class DownloadManager(
                 it.copy(state = DownloadState.CANCELLED)
             }
             if (cancelled) {
-                engine.cancel(id)
+                cancelEngineUnderLock(id)
                 pump()
             }
         } else if (current.state in terminalStates) {
@@ -460,6 +508,40 @@ class DownloadManager(
                 idLock.unlock()
             }
         }
+    }
+
+    /**
+     * Fires [engine.cancel] for [id] under the id's start/teardown mutex — the
+     * serialization that closes the cancel-vs-pump-claim window (see [cancel]): the pump
+     * holds the same mutex across its claim-and-start, so an engine.cancel issued here
+     * either precedes that start entirely (the claim guard then refuses the CANCELLED
+     * item) or is ordered strictly after the started torrent exists and kills it.
+     * Non-suspending fast path via [Mutex.tryLock]; contended (a start or teardown is
+     * mid-flight — holders never suspend for long) the cancel defers to [scope] exactly
+     * like the pump backstop does. After acquiring, re-check the state and only fire
+     * while the id is gone (its drop already owns the teardown) or still CANCELLED — any
+     * other state means a re-enqueued round re-took the id and owns the engine side, so
+     * the deferred cancel must not kill its fresh torrent.
+     */
+    private fun cancelEngineUnderLock(id: String) {
+        val idLock = lockFor(id)
+        if (idLock.tryLock()) {
+            try {
+                cancelIfStillOwned(id)
+            } finally {
+                idLock.unlock()
+            }
+        } else {
+            scope.launch {
+                idLock.withLock { cancelIfStillOwned(id) }
+            }
+        }
+    }
+
+    /** The deferred/sync cancel's re-check: see [cancelEngineUnderLock]. */
+    private fun cancelIfStillOwned(id: String) {
+        val item = _items.value.firstOrNull { it.request.id == id }
+        if (item == null || item.state == DownloadState.CANCELLED) engine.cancel(id)
     }
 
     private fun onEngineEvent(event: EngineEvent) {

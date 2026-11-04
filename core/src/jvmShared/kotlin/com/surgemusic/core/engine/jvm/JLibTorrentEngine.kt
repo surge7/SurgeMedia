@@ -48,9 +48,16 @@ class JLibTorrentEngine(
         /**
          * How long [sampleStatus] holds back a finished status after a [setWantedFiles]
          * — long enough for the session thread to apply the new priorities (observed
-         * applied within well under a second; this is the safety margin).
+         * applied within well under a second; this is the safety margin). All deadline
+         * math below runs on [System.nanoTime]: monotonic, immune to NTP wall-clock jumps.
          */
-        const val PRIORITY_SETTLE_MS = 5_000L
+        const val PRIORITY_SETTLE_NS = 5_000L * 1_000_000L
+
+        /** How long [start]'s find loop waits for the handle to be added to the session. */
+        const val ADD_WINDOW_TIMEOUT_NS = 20_000L * 1_000_000L
+
+        /** How long [start] waits for a removed stray torrent to actually leave the session. */
+        const val STRAY_GONE_TIMEOUT_NS = 10_000L * 1_000_000L
     }
 
     private val session = SessionManager()
@@ -91,7 +98,10 @@ class JLibTorrentEngine(
     /** One announce loop per id — a new [announceTrackers] call retires the previous job. */
     private val announceJobs = ConcurrentHashMap<String, Job>()
 
-    /** [setWantedFiles] timestamp per id — arms the stale-finished guard in [sampleStatus]. */
+    /**
+     * [setWantedFiles] monotonic timestamp ([System.nanoTime]) per id — arms the
+     * stale-finished guard in [sampleStatus].
+     */
     private val pendingWanted = ConcurrentHashMap<String, Long>()
 
     /**
@@ -167,7 +177,7 @@ class JLibTorrentEngine(
         runCatching {
             val st = h.status()
             if (settledAt != null) {
-                if (!isFinished(st) || System.currentTimeMillis() - settledAt >= PRIORITY_SETTLE_MS) {
+                if (!isFinished(st) || System.nanoTime() - settledAt >= PRIORITY_SETTLE_NS) {
                     pendingWanted.remove(id)
                 } else {
                     return
@@ -314,10 +324,10 @@ class JLibTorrentEngine(
             val stray = runCatching { session.find(info.infoHashV1()) }.getOrNull()
             if (stray != null) {
                 runCatching { session.remove(stray) }
-                val goneDeadline = System.currentTimeMillis() + 10_000
+                val goneDeadline = System.nanoTime() + STRAY_GONE_TIMEOUT_NS
                 while (
                     runCatching { session.find(info.infoHashV1()) }.getOrNull() != null &&
-                    System.currentTimeMillis() < goneDeadline
+                    System.nanoTime() < goneDeadline
                 ) {
                     delay(200)
                 }
@@ -363,8 +373,8 @@ class JLibTorrentEngine(
                 )
                 return@launch
             }
-            val deadline = System.currentTimeMillis() + 20_000
-            while (active[id]?.handle == null && System.currentTimeMillis() < deadline) {
+            val deadline = System.nanoTime() + ADD_WINDOW_TIMEOUT_NS
+            while (active[id]?.handle == null && System.nanoTime() < deadline) {
                 // jlibtorrent 2.0.12.9 has no TorrentInfo.infoHash(); the test torrents
                 // are v1, so the v1 info-hash is the lookup key (Phase-1 usage).
                 val h = session.find(info.infoHashV1())
@@ -389,7 +399,7 @@ class JLibTorrentEngine(
                             a.pendingWanted?.let {
                                 completed.remove(id)
                                 applyPriorities(h, info, it)
-                                pendingWanted[id] = System.currentTimeMillis()
+                                pendingWanted[id] = System.nanoTime()
                             }
                             if (a.wantPaused) runCatching { h.pause() }
                             false
@@ -472,7 +482,7 @@ class JLibTorrentEngine(
             applyPriorities(handle, a.info, wantedFiles)
             val paused = runCatching { isPaused(handle.status()) }.getOrDefault(false)
             if (!paused) runCatching { handle.resume() }
-            pendingWanted[id] = System.currentTimeMillis()
+            pendingWanted[id] = System.nanoTime()
         }
     }
 

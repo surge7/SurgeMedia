@@ -5,10 +5,14 @@ import com.surgemusic.core.engine.TorrentEngine
 import com.surgemusic.core.engine.TorrentFileInfo
 import kotlin.io.encoding.Base64
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
@@ -560,6 +564,154 @@ class DownloadManagerTest {
         assertEquals(DownloadState.DOWNLOADING, item(manager, "t-1").state)
     }
 
+    // ── addFiles vs completion race (raced-to-DONE degrades into the union restart) ──
+
+    /** Large file list: makes each active-state merge generation's union sum slow. */
+    private val manyFiles: List<TorrentFileInfo> =
+        List(100_000) { i -> TorrentFileInfo(index = i, path = "album/$i.flac", sizeBytes = 1) }
+
+    /**
+     * The completion racing a selection extension: addFiles' merge runs as a CAS loop
+     * over the items list, so a completion landing mid-merge must not drop the new
+     * files — when a retry snapshot sees DONE, the merge degrades into the DONE restart
+     * wanting old+new. The machinery below holds the merge pending until the completion
+     * has fully landed:
+     * - the 100k-entry file list makes each active-state merge generation slow (the
+     *   union sum), while a churn item's Progress handler mutates the list every
+     *   collector cycle (~one plain map) — the merge's CAS therefore never finds a
+     *   mutation-free attempt and always loses the ping-pong while mutations flow;
+     * - thousands of filler items keep the collector's per-event cost high, so the
+     *   FINALIZING→DONE window stays smaller than one merge generation.
+     * The emitter is cancelled the moment the Completed event is accepted: the already
+     * buffered Progress events keep mutating until the buffer drains, the two flips
+     * then process back-to-back, and the merge's next retry snapshot sees DONE → union
+     * restart. Should scheduling still produce another outcome, each is checked for
+     * coherence (nothing dropped); at least one round must exercise the raced-to-DONE
+     * union restart.
+     */
+    @Test
+    fun addFilesRacingCompletionRestartsWithUnion() = runBlocking {
+        var sawUnionRestart = false
+        repeat(3) { round ->
+            val fake = FakeEngine().apply { files = manyFiles }
+            val manager = DownloadManager(fake, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
+            fake.awaitSubscribed()
+            // t-1 first: list order decides which QUEUED item a pump claims when a slot
+            // frees up, so t-1's restart always beats the fillers into the engine.
+            manager.enqueue(request("t-1", sizeBytes = 100), torrent, "/staging/t-1", wantedFileIndices = setOf(0))
+            manager.enqueue(request("t-churn"), torrent, "/staging/t-churn")
+            awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+            repeat(15_000) { manager.enqueue(request("f-$it"), torrent, "/staging/f-$it") }
+
+            var churnBeat = 0L
+            val churn = launch(Dispatchers.Default) {
+                while (isActive) {
+                    // bytesDone must vary: StateFlow conflates equal values, so a
+                    // Progress payload identical to the last one would not commit a
+                    // list change at all — and the merge would win every CAS attempt
+                    if (
+                        !fake.events.tryEmit(
+                            EngineEvent.Progress("t-churn", bytesDone = ++churnBeat, bytesTotal = 2, downloadSpeed = 3, peers = 0),
+                        )
+                    ) {
+                        delay(1) // buffer full — retry once the collector has drained a bit
+                    }
+                }
+            }
+            val addDeferred = async(Dispatchers.Default) { manager.addFiles("t-1", setOf(1, 2)) }
+            delay(20) // the merge is now spinning, always losing the CAS ping-pong
+            while (!fake.events.tryEmit(EngineEvent.Completed("t-1"))) delay(1)
+            // stop the EMITTER now: the buffered Progress keeps mutating while it
+            // drains, then the FINALIZING→DONE flips process back-to-back (their window
+            // is one dispatch hop, far smaller than a merge generation)
+            churn.cancel()
+            awaitItem(manager, "t-1") { it.state == DownloadState.DONE }
+            val added = addDeferred.await()
+            // reclaim the churn item's slot so a pending restart can reach the engine
+            manager.cancel("t-churn")
+            val racerStarts = fake.started.value.filter { it.id == "t-1" }
+
+            val stateDump = "items=${manager.items.value.take(6).map { it.request.id to it.state }} " +
+                "starts=${fake.started.value.map { it.id }} rounds=$round"
+            if (!added) {
+                // raced only to FINALIZING — the sanctioned drop; the item settles DONE
+                // with the engine untouched (the original start is the racer's only one)
+                assertEquals(DownloadState.DONE, item(manager, "t-1").state, "round $round: $stateDump")
+                assertEquals(1, racerStarts.size, "round $round: $stateDump")
+                assertTrue(fake.priorityUpdates.value.isEmpty(), "round $round")
+            } else if (fake.priorityUpdates.value.isNotEmpty()) {
+                // the merge won: a live priority update carrying the union, no restart
+                assertEquals(listOf("t-1" to setOf(0, 1, 2)), fake.priorityUpdates.value, "round $round")
+                assertEquals(1, racerStarts.size, "round $round: $stateDump")
+            } else {
+                // a restart happened: the plain DONE path wants the new set only, the
+                // raced-to-DONE path wants old+new — the union
+                assertEquals(2, racerStarts.size, "round $round: $stateDump")
+                val wanted = racerStarts.last().wantedFiles
+                assertTrue(wanted == setOf(1, 2) || wanted == setOf(0, 1, 2), "round $round: ${racerStarts}")
+                if (wanted == setOf(0, 1, 2)) {
+                    sawUnionRestart = true
+                    awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+                    assertEquals(setOf(0, 1, 2), manager.wantedFiles("t-1"), "round $round")
+                    assertEquals(3L, item(manager, "t-1").request.sizeBytes, "round $round")
+                    assertTrue(fake.priorityUpdates.value.isEmpty(), "round $round")
+                }
+            }
+        }
+        assertTrue(sawUnionRestart, "no round exercised the raced-to-DONE union restart")
+    }
+
+    // ── cancel vs pump claim-and-start (the per-id mutex closes the orphan window) ───
+
+    /**
+     * [FakeEngine] wrapper whose [start] blocks briefly — widens the pump's
+     * claim-and-start span (the mutex-held window) so a cancel fired mid-span really
+     * lands in it; without the wrapper the window is nanoseconds and this stress would
+     * never exercise the ordering it exists to verify.
+     */
+    private class SlowStartEngine(
+        private val fake: FakeEngine,
+        private val startDelayMs: Long,
+    ) : TorrentEngine by fake {
+        override fun start(id: String, torrentBytes: ByteArray, targetDir: String, wantedFiles: Set<Int>) {
+            Thread.sleep(startDelayMs)
+            fake.start(id, torrentBytes, targetDir, wantedFiles)
+        }
+    }
+
+    @Test
+    fun cancelVsPumpStartStressNeverLeavesRunningTorrent() = runBlocking {
+        val fake = FakeEngine()
+        val engine = OrderingEngine(SlowStartEngine(fake, startDelayMs = 25))
+        val manager = DownloadManager(engine, MutableStateFlow(3)) { _, _ -> Result.success("ok") }
+        fake.awaitSubscribed()
+
+        repeat(40) { round ->
+            val id = "t-$round"
+            val enqueue = launch(Dispatchers.Default) { manager.enqueue(request(id), torrent, "/staging/$id") }
+            // cancel as soon as the item exists — by then the pump is usually inside its
+            // claim-and-start span (SlowStartEngine holds it for ~25 ms), so the cancel
+            // lands in the window the per-id mutex must close
+            awaitItem(manager, id) { true }
+            manager.cancel(id)
+            enqueue.join()
+            // a contended cancel defers its engine.cancel to the manager scope
+            withTimeout(5_000) { while (!fake.cancelled.value.contains(id)) delay(10) }
+            assertEquals(DownloadState.CANCELLED, item(manager, id).state, "round $round: ${manager.items.value}")
+            // no running torrent behind the CANCELLED item: at most one start, and no
+            // start after the final cancel — when the pump won the race, its started
+            // torrent must have been torn down by the serialized engine.cancel after it
+            val log = engine.log
+            val lastCancel = log.lastIndexOf("cancel:$id")
+            assertTrue(lastCancel >= 0, "round $round: engine cancel missing: $log")
+            assertTrue(log.count { it == "start:$id" } <= 1, "round $round: $log")
+            assertTrue(
+                log.drop(lastCancel + 1).none { it == "start:$id" },
+                "round $round: start landed after the final cancel (running torrent behind CANCELLED item): $log",
+            )
+        }
+    }
+
     // ── Queue persistence (crash/exit recovery) ──────────────────────────────────────
 
     @Test
@@ -647,11 +799,11 @@ private class FakeQueuePersistence(
 private fun List<PersistedDownload>.containsPersisted(id: String): Boolean = any { it.id == id }
 
 /**
- * [FakeEngine] wrapper logging start/cancel chronologically — FakeEngine's per-call
+ * [TorrentEngine] wrapper logging start/cancel chronologically — FakeEngine's per-call
  * lists cannot express call ORDER, which order-sensitive tests (e.g. "the stale DONE
  * teardown must not cancel after a restart's start") need. Everything else delegates.
  */
-private class OrderingEngine(private val fake: FakeEngine) : TorrentEngine by fake {
+private class OrderingEngine(private val fake: TorrentEngine) : TorrentEngine by fake {
     private val logFlow = MutableStateFlow<List<String>>(emptyList())
 
     /** Engine start/cancel calls as "start:<id>" / "cancel:<id>", in call order. */
