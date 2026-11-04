@@ -2,6 +2,7 @@ package com.surgemusic.app.downloads
 
 import com.surgemusic.app.VideoLibraryParent
 import com.surgemusic.app.settings.DesktopSettingsStore
+import com.surgemusic.app.settings.SettingKeys
 import com.surgemusic.core.downloads.DownloadItem
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -21,8 +22,8 @@ class DesktopFileCleaner(private val settings: DesktopSettingsStore) : DownloadF
     /** Library roots the finalizer has written to — custom or built-in, plus legacy. */
     private fun roots(): List<File> {
         val home = File(System.getProperty("user.home"))
-        val builtinMusic = File(home, "Music/$BRAND_DIR")
-        val builtinMovies = File(home, "$VideoLibraryParent/$BRAND_DIR")
+        val builtinMusic = File(home, "Music/${SettingKeys.BRAND_DIR}")
+        val builtinMovies = File(home, "$VideoLibraryParent/${SettingKeys.BRAND_DIR}")
         val music = settings.musicFolder.value.ifBlank { builtinMusic.absolutePath }
         val movies = settings.videoFolder.value.ifBlank { builtinMovies.absolutePath }
         return buildList {
@@ -32,7 +33,7 @@ class DesktopFileCleaner(private val settings: DesktopSettingsStore) : DownloadF
             // finalized before the switch still live there.
             if (File(music).absolutePath != builtinMusic.absolutePath) add(builtinMusic)
             if (File(movies).absolutePath != builtinMovies.absolutePath) add(builtinMovies)
-            add(File(home, "Music/$BRAND_DIR_LEGACY")) // pre-rebrand builds
+            add(File(home, "Music/${SettingKeys.BRAND_DIR_LEGACY}")) // pre-rebrand builds
         }
     }
 
@@ -60,9 +61,9 @@ class DesktopFileCleaner(private val settings: DesktopSettingsStore) : DownloadF
     private fun sweepRoots(): List<File> {
         val home = File(System.getProperty("user.home"))
         return listOf(
-            File(home, "Music/$BRAND_DIR"),
-            File(home, "$VideoLibraryParent/$BRAND_DIR"),
-            File(home, "Music/$BRAND_DIR_LEGACY"),
+            File(home, "Music/${SettingKeys.BRAND_DIR}"),
+            File(home, "$VideoLibraryParent/${SettingKeys.BRAND_DIR}"),
+            File(home, "Music/${SettingKeys.BRAND_DIR_LEGACY}"),
         )
     }
 
@@ -89,10 +90,5 @@ class DesktopFileCleaner(private val settings: DesktopSettingsStore) : DownloadF
         val child = root.resolve(name)
         val rootPath = root.canonicalPath + File.separator
         return if (child.canonicalPath.startsWith(rootPath)) child else null
-    }
-
-    private companion object {
-        const val BRAND_DIR = "SurgeMedia"
-        const val BRAND_DIR_LEGACY = "SurgeMusic"
     }
 }

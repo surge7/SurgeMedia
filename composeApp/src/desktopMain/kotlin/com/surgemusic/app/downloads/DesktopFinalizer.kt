@@ -2,6 +2,7 @@ package com.surgemusic.app.downloads
 
 import com.surgemusic.app.VideoLibraryParent
 import com.surgemusic.app.settings.DesktopSettingsStore
+import com.surgemusic.app.settings.SettingKeys
 import com.surgemusic.core.downloads.DownloadItem
 import java.io.File
 import java.nio.file.AtomicMoveNotSupportedException
@@ -52,7 +53,7 @@ class DesktopFinalizer(private val settings: DesktopSettingsStore) {
 
     private fun root(custom: String, defaultParent: String): Path =
         if (custom.isBlank()) {
-            Path.of(System.getProperty("user.home"), defaultParent, BRAND_DIR)
+            Path.of(System.getProperty("user.home"), defaultParent, SettingKeys.BRAND_DIR)
         } else {
             Path.of(custom)
         }
@@ -160,9 +161,5 @@ class DesktopFinalizer(private val settings: DesktopSettingsStore) {
             ext in videoExt -> Kind.VIDEO
             else -> null
         }
-    }
-
-    private companion object {
-        const val BRAND_DIR = "SurgeMedia"
     }
 }

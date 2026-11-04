@@ -39,8 +39,8 @@ class SettingsStore(private val store: KeyValueStore) : AppSettings {
     private val _videoFolder = MutableStateFlow(store.getString(SettingKeys.VIDEO_FOLDER) ?: "")
     override val videoFolder: StateFlow<String> = _videoFolder.asStateFlow()
 
-    override val musicFolderDefaultLabel: String = "Music/$BRAND_DIR"
-    override val videoFolderDefaultLabel: String = "Movies/$BRAND_DIR"
+    override val musicFolderDefaultLabel: String = "Music/${SettingKeys.BRAND_DIR}"
+    override val videoFolderDefaultLabel: String = "Movies/${SettingKeys.BRAND_DIR}"
 
     override fun setWifiOnly(enabled: Boolean) {
         store.putBoolean(SettingKeys.WIFI_ONLY, enabled)
@@ -54,7 +54,7 @@ class SettingsStore(private val store: KeyValueStore) : AppSettings {
 
     /** The Settings screen exposes a 1–5 slider (Task 9); clamping keeps hand-edited values safe. */
     override fun setConcurrentDownloads(count: Int) {
-        val clamped = count.coerceIn(MIN_CONCURRENT_DOWNLOADS, MAX_CONCURRENT_DOWNLOADS)
+        val clamped = count.coerceIn(SettingKeys.MIN_CONCURRENT_DOWNLOADS, SettingKeys.MAX_CONCURRENT_DOWNLOADS)
         store.putInt(SettingKeys.CONCURRENT_DOWNLOADS, clamped)
         _concurrentDownloads.value = clamped
     }
@@ -77,11 +77,5 @@ class SettingsStore(private val store: KeyValueStore) : AppSettings {
     override fun setVideoFolder(path: String) {
         store.putString(SettingKeys.VIDEO_FOLDER, path)
         _videoFolder.value = path
-    }
-
-    private companion object {
-        const val BRAND_DIR = "SurgeMedia"
-        const val MIN_CONCURRENT_DOWNLOADS = 1
-        const val MAX_CONCURRENT_DOWNLOADS = 5
     }
 }

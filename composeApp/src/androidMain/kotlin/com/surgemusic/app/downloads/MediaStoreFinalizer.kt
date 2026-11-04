@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
+import com.surgemusic.app.settings.SettingKeys
 import com.surgemusic.app.settings.SettingsStore
 import com.surgemusic.core.downloads.DownloadItem
 import kotlinx.coroutines.Dispatchers
@@ -121,9 +122,9 @@ internal object MediaFiles {
      * in `Movies/SurgeMedia/<album>/` (same collection-root rule for Video).
      */
     internal fun collectionRootFor(kind: String): String = when (kind) {
-        KIND_AUDIO -> "Music/SurgeMedia"
-        KIND_IMAGE -> "Pictures/SurgeMedia"
-        else -> "Movies/SurgeMedia"
+        KIND_AUDIO -> "Music/" + SettingKeys.BRAND_DIR
+        KIND_IMAGE -> "Pictures/" + SettingKeys.BRAND_DIR
+        else -> "Movies/" + SettingKeys.BRAND_DIR
     }
 }
 
@@ -175,9 +176,9 @@ class MediaStoreFinalizer(
     }
 
     private fun defaultPrefixFor(kind: String): String = when (kind) {
-        MediaFiles.KIND_AUDIO -> "Music/SurgeMedia/"
-        MediaFiles.KIND_VIDEO -> "Movies/SurgeMedia/"
-        else -> "Pictures/SurgeMedia/"
+        MediaFiles.KIND_AUDIO -> "Music/${SettingKeys.BRAND_DIR}/"
+        MediaFiles.KIND_VIDEO -> "Movies/${SettingKeys.BRAND_DIR}/"
+        else -> "Pictures/${SettingKeys.BRAND_DIR}/"
     }
 
     suspend fun finalize(item: DownloadItem, stagingDir: String): Result<String> =

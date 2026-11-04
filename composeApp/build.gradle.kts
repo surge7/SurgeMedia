@@ -77,6 +77,20 @@ tasks.named<Test>("jvmTest") {
     extensions.configure<TestRetryTaskExtension> { maxRetries.set(2) }
 }
 
+// Host OS of the machine running Gradle — it selects the desktop jlibtorrent native
+// (see :core/build.gradle.kts), so every desktop installer built here carries this
+// host's native and packaging is host-OS-bound (packageDmg on macOS, packageMsi/packageExe
+// on Windows). The INFO line makes what was picked visible in CI logs at configuration time.
+val hostOsName = System.getProperty("os.name").lowercase()
+val macOSHost = hostOsName.contains("mac")
+val windowsHost = hostOsName.contains("win")
+val desktopNative = when {
+    windowsHost -> "com.frostwire:jlibtorrent-windows"
+    hostOsName.contains("nix") || hostOsName.contains("nux") -> "com.frostwire:jlibtorrent-linux-x86_64"
+    else -> "com.frostwire:jlibtorrent-macosx-arm64"
+}
+logger.lifecycle("composeApp: host OS '$hostOsName' → desktop jlibtorrent native '$desktopNative'")
+
 compose.desktop.application {
     // JvmApplication.mainClass is a plain String var in compose-gradle-plugin 1.12.0
     // (no Property.set) — assign directly.
@@ -91,10 +105,6 @@ compose.desktop.application {
         // Installer version: both package managers require MAJOR.MINOR.BUILD >= 1.0.0
         // (the app version itself stays in versionName / Version.APP).
         packageVersion = "1.0.0"
-
-        val hostOsName = System.getProperty("os.name").lowercase()
-        val macOSHost = hostOsName.contains("mac")
-        val windowsHost = hostOsName.contains("win")
 
         if (macOSHost) {
             // Finder-launched apps have CWD=/ so the JVM's default ./hs_err_pid*.log is
@@ -125,6 +135,44 @@ compose.desktop.application {
                 upgradeUuid = "4D0CED5D-CCE5-4B3A-A7FD-84C45FB04D21"
             }
         }
+    }
+}
+
+// Cross-packaging guard (fail fast): the native inside any desktop installer is the one
+// the Gradle host picked (see [desktopNative] above), so packageMsi/packageExe only
+// produce a correct Windows installer on a Windows host and packageDmg only on macOS.
+// packageDistributionForCurrentOS picks the host-appropriate format by construction and
+// deliberately has no guard.
+//
+// Two layers, one message: (1) a configuration-time check of the requested task names,
+// so a wrong-host invocation fails before ANY task work — an earlier chain task such as
+// checkRuntime could otherwise fail or run long first and mask the real reason; (2)
+// doFirst on the packaging tasks themselves, catching invocations that bypass the
+// command line (e.g. another task wiring them as a dependency) at execution start,
+// before the long jpackage/installer step.
+fun packagingHostError(taskNames: String, requiredHost: String): GradleException = GradleException(
+    "$taskNames must run on a $requiredHost host: the desktop jlibtorrent native is selected " +
+        "by the host OS and this host is ${System.getProperty("os.name")} " +
+        "(packaging '$desktopNative'). Use packageDistributionForCurrentOS for the " +
+        "host-appropriate format."
+)
+
+val requestedTaskNames = gradle.startParameter.taskNames.map { it.substringAfterLast(':') }.toSet()
+if (!windowsHost && requestedTaskNames.any { it == "packageMsi" || it == "packageExe" }) {
+    throw packagingHostError("packageMsi/packageExe", "Windows")
+}
+if (!macOSHost && "packageDmg" in requestedTaskNames) {
+    throw packagingHostError("packageDmg", "macOS")
+}
+
+tasks.matching { it.name == "packageMsi" || it.name == "packageExe" }.configureEach {
+    doFirst {
+        if (!windowsHost) throw packagingHostError("packageMsi/packageExe", "Windows")
+    }
+}
+tasks.matching { it.name == "packageDmg" }.configureEach {
+    doFirst {
+        if (!macOSHost) throw packagingHostError("packageDmg", "macOS")
     }
 }
 

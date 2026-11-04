@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.BaseColumns
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
+import com.surgemusic.app.settings.SettingKeys
 import com.surgemusic.app.settings.SettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -117,12 +118,12 @@ class MediaStoreLibrary(
 
     /** Built-in + legacy roots — also the only roots [deleteAll] ever sweeps. */
     private val builtinRoots: List<Root> = listOf(
-        Root("music", audioCollection(), "Music/SurgeMedia/", "Music", "Music"),
-        Root("movies", videoCollection(), "Movies/SurgeMedia/", "Movies", "Movies"),
-        Root("pictures", MediaStore.Images.Media.getContentUri(volume), "Pictures/SurgeMedia/", "Pictures", "Pictures"),
-        Root("music_legacy", audioCollection(), "Music/SurgeMusic/", "Music", "Music (legacy)"),
-        Root("movies_legacy", videoCollection(), "Movies/SurgeMusic/", "Movies", "Movies (legacy)"),
-        Root("pictures_legacy", MediaStore.Images.Media.getContentUri(volume), "Pictures/SurgeMusic/", "Pictures", "Pictures (legacy)"),
+        Root("music", audioCollection(), "Music/${SettingKeys.BRAND_DIR}/", "Music", "Music"),
+        Root("movies", videoCollection(), "Movies/${SettingKeys.BRAND_DIR}/", "Movies", "Movies"),
+        Root("pictures", MediaStore.Images.Media.getContentUri(volume), "Pictures/${SettingKeys.BRAND_DIR}/", "Pictures", "Pictures"),
+        Root("music_legacy", audioCollection(), "Music/${SettingKeys.BRAND_DIR_LEGACY}/", "Music", "Music (legacy)"),
+        Root("movies_legacy", videoCollection(), "Movies/${SettingKeys.BRAND_DIR_LEGACY}/", "Movies", "Movies (legacy)"),
+        Root("pictures_legacy", MediaStore.Images.Media.getContentUri(volume), "Pictures/${SettingKeys.BRAND_DIR_LEGACY}/", "Pictures", "Pictures (legacy)"),
     )
 
     /** Custom-folder MediaStore root for one kind, or null when unset/unmappable. */

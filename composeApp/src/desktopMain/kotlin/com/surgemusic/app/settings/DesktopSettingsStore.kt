@@ -67,8 +67,8 @@ class DesktopSettingsStore(
     override val videoFolder: StateFlow<String> = _videoFolder.asStateFlow()
 
     /** Built-in destinations (Settings ▸ Storage display labels). */
-    override val musicFolderDefaultLabel: String = "~/Music/$BRAND_DIR"
-    override val videoFolderDefaultLabel: String = "~/$VideoLibraryParent/$BRAND_DIR"
+    override val musicFolderDefaultLabel: String = "~/Music/${SettingKeys.BRAND_DIR}"
+    override val videoFolderDefaultLabel: String = "~/$VideoLibraryParent/${SettingKeys.BRAND_DIR}"
 
     override fun setWifiOnly(enabled: Boolean) {
         val snapshot = synchronized(ioLock) {
@@ -90,7 +90,7 @@ class DesktopSettingsStore(
 
     /** The Settings screen exposes a 1–5 slider (Task 9); clamping keeps hand-edited values safe. */
     override fun setConcurrentDownloads(count: Int) {
-        val clamped = count.coerceIn(MIN_CONCURRENT_DOWNLOADS, MAX_CONCURRENT_DOWNLOADS)
+        val clamped = count.coerceIn(SettingKeys.MIN_CONCURRENT_DOWNLOADS, SettingKeys.MAX_CONCURRENT_DOWNLOADS)
         val snapshot = synchronized(ioLock) {
             props.setProperty(SettingKeys.CONCURRENT_DOWNLOADS, clamped.toString())
             _concurrentDownloads.value = clamped
@@ -169,8 +169,5 @@ class DesktopSettingsStore(
     private companion object {
         const val DIR = ".surgemusic"
         const val FILE = "settings.properties"
-        const val BRAND_DIR = "SurgeMedia"
-        const val MIN_CONCURRENT_DOWNLOADS = 1
-        const val MAX_CONCURRENT_DOWNLOADS = 5
     }
 }
