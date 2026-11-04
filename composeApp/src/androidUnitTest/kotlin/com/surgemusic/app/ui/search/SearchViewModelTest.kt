@@ -252,4 +252,96 @@ class SearchViewModelTest {
         assertIs<SearchUiState.Ready>(vm.uiState.value)
         assertEquals(listOf(1L), vm.sortedResults.value.map { it.topicId }, "sortedResults updates once results land")
     }
+
+    @Test
+    fun loadMoreUsesOriginalQueryAfterFieldEdit() {
+        val requested = mutableListOf<Pair<String, Int>>()
+        val pages = mapOf(
+            0 to SearchResultPage(rows = listOf(row(1)), start = 0),
+            1 to SearchResultPage(rows = listOf(row(2)), start = 1),
+        )
+        val vm = SearchViewModel(searchFn = { q, start ->
+            requested += q to start
+            Result.success(pages.getValue(start))
+        })
+
+        vm.onQueryChange("pink floyd")
+        vm.search()
+        vm.onQueryChange("pink floyd wall") // edit the field without pressing Search again
+        vm.loadMore()
+
+        assertEquals(
+            listOf("pink floyd" to 0, "pink floyd" to 1),
+            requested,
+            "load-more must paginate the query that was searched, not the edited field text",
+        )
+        assertEquals(listOf(row(1), row(2)), vm.results.value)
+    }
+
+    @Test
+    fun retryUsesOriginalQueryAfterFieldEdit() {
+        val requested = mutableListOf<String>()
+        var calls = 0
+        val vm = SearchViewModel(searchFn = { q, _ ->
+            requested += q
+            calls++
+            if (calls == 1) {
+                Result.failure(TrackerError("timeout", TrackerErrorKind.NETWORK))
+            } else {
+                Result.success(SearchResultPage(rows = listOf(row(1)), start = 0))
+            }
+        })
+
+        vm.onQueryChange("pink floyd")
+        vm.search() // fails
+        vm.onQueryChange("something else") // edit the field without pressing Search again
+        vm.retry()
+
+        assertEquals(listOf("pink floyd", "pink floyd"), requested, "retry must re-run the searched query")
+    }
+
+    @Test
+    fun loadMoreSkipsRowsAlreadyLoaded() {
+        val pages = mapOf(
+            0 to SearchResultPage(rows = listOf(row(1), row(2)), start = 0),
+            2 to SearchResultPage(rows = listOf(row(2), row(3)), start = 2), // row(2) duplicated server-side
+        )
+        val vm = SearchViewModel(searchFn = { _, start -> Result.success(pages.getValue(start)) })
+
+        vm.onQueryChange("pink floyd")
+        vm.search()
+        vm.loadMore()
+
+        assertEquals(
+            listOf(row(1), row(2), row(3)),
+            vm.results.value,
+            "a row whose topicId is already loaded must not be appended (LazyColumn keys crash on dupes)",
+        )
+    }
+
+    @Test
+    fun newSearchCancelsInFlightSearchAndOnlyFreshResultsLand() {
+        val staleGate = CompletableDeferred<Unit>()
+        val vm = SearchViewModel(searchFn = { q, _ ->
+            if (q == "first") {
+                staleGate.await() // hold the stale search in-flight until the test cancels it
+            }
+            Result.success(SearchResultPage(rows = listOf(row(if (q == "first") 99 else 7)), start = 0))
+        })
+
+        vm.onQueryChange("first")
+        vm.search() // runs unconfined until staleGate.await() suspends
+        assertIs<SearchUiState.Loading>(vm.uiState.value)
+
+        vm.onQueryChange("second")
+        vm.search() // cancels the stale search and starts the fresh one
+
+        val state = assertIs<SearchUiState.Ready>(vm.uiState.value)
+        assertTrue(state.hasMore)
+        assertEquals(
+            listOf(7L),
+            vm.results.value.map { it.topicId },
+            "the cancelled stale search must never overwrite the fresh one's results",
+        )
+    }
 }

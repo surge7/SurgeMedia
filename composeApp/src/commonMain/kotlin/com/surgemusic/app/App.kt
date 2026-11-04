@@ -33,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -131,6 +132,9 @@ fun App(
     windowTopInset: Dp = 0.dp,
 ) {
     var currentTab by remember { mutableStateOf(AppTab.Search) }
+    // Per-tab saveable state (search scroll position, list states): keyed by tab in
+    // [tabContent] so switching tabs saves/restores instead of dropping it.
+    val saveableStateHolder = rememberSaveableStateHolder()
     var showLogin by remember { mutableStateOf(false) }
     var selectedRow by remember { mutableStateOf<SearchResultRow?>(null) }
 
@@ -155,14 +159,18 @@ fun App(
     val strings = remember(language) { stringsFor(language, systemLanguageIsRussian()) }
 
     // Sticky retry: the snackbar with "Retry" can outlive the initial attempt. The
-    // download functions capture the *current* row via state read, so the retry action can
-    // re-trigger the same lambda after the snackbar fades.
+    // download functions capture the row current at launch, and every completion checks
+    // that captured row against the selection before touching the shared details flags —
+    // otherwise a slow prepare/start that lands after the user closed the row or opened
+    // another one would clobber the new row's state (and two prepares could race).
+    // Retrying keeps the originally captured row, not whatever is selected now.
     suspend fun runStart(row: SearchResultRow, prepared: PreparedTorrent, wantedFiles: Set<Int>) {
         detailsDownloading = true
         detailsError = null
         detailsAdded = false
         onStartDownload(row, prepared, wantedFiles).fold(
             onSuccess = {
+                if (selectedRow?.topicId != row.topicId) return@fold
                 detailsDownloading = false
                 detailsAdded = true
                 snackbarHostState.showSnackbar(
@@ -171,6 +179,7 @@ fun App(
                 )
             },
             onFailure = { e ->
+                if (selectedRow?.topicId != row.topicId) return@fold
                 detailsDownloading = false
                 val message = e.message ?: e::class.simpleName ?: strings.unknownError
                 detailsError = message
@@ -179,7 +188,7 @@ fun App(
                     actionLabel = strings.actionRetry,
                     duration = SnackbarDuration.Long,
                 )
-                if (retryResult == SnackbarResult.ActionPerformed) {
+                if (retryResult == SnackbarResult.ActionPerformed && selectedRow?.topicId == row.topicId) {
                     runStart(row, prepared, wantedFiles)
                 }
             },
@@ -191,6 +200,7 @@ fun App(
         detailsAdded = false
         onPrepareDownload(row).fold(
             onSuccess = { prepared ->
+                if (selectedRow?.topicId != row.topicId) return@fold
                 detailsDownloading = false
                 if (prepared.files.size > 1) {
                     // Multi-file torrent: let the user pick what to download.
@@ -200,6 +210,7 @@ fun App(
                 }
             },
             onFailure = { e ->
+                if (selectedRow?.topicId != row.topicId) return@fold
                 detailsDownloading = false
                 val message = e.message ?: e::class.simpleName ?: strings.unknownError
                 detailsError = message
@@ -208,7 +219,7 @@ fun App(
                     actionLabel = strings.actionRetry,
                     duration = SnackbarDuration.Long,
                 )
-                if (retryResult == SnackbarResult.ActionPerformed) {
+                if (retryResult == SnackbarResult.ActionPerformed && selectedRow?.topicId == row.topicId) {
                     runPrepare(row)
                 }
             },
@@ -306,20 +317,25 @@ fun App(
                     }
 
                     val tabContent: @Composable () -> Unit = {
-                        when (currentTab) {
-                            AppTab.Search -> SearchScreen(
-                                viewModel = searchViewModel,
-                                loggedIn = session != null,
-                                selectedTopicId = selectedRow?.topicId,
-                                onShowDetails = openDetails,
-                                onLogin = { showLogin = true },
-                            )
-                            AppTab.Downloads -> DownloadsScreen(viewModel = downloadsViewModel)
-                            AppTab.Downloaded -> LibraryScreen(viewModel = libraryViewModel)
-                            AppTab.Settings -> SettingsScreen(
-                                viewModel = settingsViewModel,
-                                onLogin = { showLogin = true },
-                            )
+                        // SaveableStateProvider keys each tab's rememberSaveable state (e.g. the
+                        // search results LazyListState) so scroll positions survive tab switches
+                        // instead of being discarded when the tab composable leaves composition.
+                        saveableStateHolder.SaveableStateProvider(currentTab) {
+                            when (currentTab) {
+                                AppTab.Search -> SearchScreen(
+                                    viewModel = searchViewModel,
+                                    loggedIn = session != null,
+                                    selectedTopicId = selectedRow?.topicId,
+                                    onShowDetails = openDetails,
+                                    onLogin = { showLogin = true },
+                                )
+                                AppTab.Downloads -> DownloadsScreen(viewModel = downloadsViewModel)
+                                AppTab.Downloaded -> LibraryScreen(viewModel = libraryViewModel)
+                                AppTab.Settings -> SettingsScreen(
+                                    viewModel = settingsViewModel,
+                                    onLogin = { showLogin = true },
+                                )
+                            }
                         }
                     }
 

@@ -508,14 +508,23 @@ private fun NetworkPanel(
             )
         }
         MirrorField(committed = mirror, onApply = onApplyMirror)
+        // The value lives in a local during a drag gesture and commits once in
+        // onValueChangeFinished — persisting per drag tick wrote the settings store on
+        // every intermediate position.
+        var dragValue by remember { mutableStateOf<Int?>(null) }
+        val effective = dragValue ?: concurrentDownloads
         Text(
-            text = strings.concurrentDownloads(concurrentDownloads),
+            text = strings.concurrentDownloads(effective),
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(top = 8.dp),
         )
         Slider(
-            value = concurrentDownloads.toFloat(),
-            onValueChange = { onConcurrentChange(it.roundToInt()) },
+            value = effective.toFloat(),
+            onValueChange = { dragValue = it.roundToInt() },
+            onValueChangeFinished = {
+                dragValue?.let(onConcurrentChange)
+                dragValue = null
+            },
             valueRange = 1f..5f,
             steps = 3, // discrete stops at 1, 2, 3, 4, 5
             colors = SliderDefaults.colors(
