@@ -10,12 +10,12 @@ import com.surgemusic.app.session.SessionVaults
 import com.surgemusic.app.settings.DesktopSettingsStore
 import com.surgemusic.app.settings.DirectoryPicker
 import com.surgemusic.app.downloads.DesktopLibrary
+import com.surgemusic.app.tracker.TrackerAppFactory
 import com.surgemusic.app.ui.downloads.DownloadsViewModel
 import com.surgemusic.app.ui.search.SearchViewModel
 import com.surgemusic.app.ui.library.LibraryViewModel
 import com.surgemusic.app.ui.settings.SettingsViewModel
 import com.surgemusic.core.downloads.DownloadManager
-import com.surgemusic.core.downloads.DownloadRequest
 import com.surgemusic.core.downloads.PreparedTorrent
 import com.surgemusic.core.engine.TorrentEngine
 import com.surgemusic.core.engine.jvm.JLibTorrentEngine
@@ -30,9 +30,10 @@ import kotlinx.coroutines.withContext
 
 /**
  * Manual DI on desktop (plan Task 6) — the jvm twin of androidMain's [AppContainer]:
- * lazy singletons shared by all screens. `engine`, `sessionStore`, `settings`,
- * `trackerClient()`, the search/downloads/settings view models, `downloadManager` and the
- * search→download pipeline ([download]) are wired.
+ * lazy singletons shared by all screens, with the platform-agnostic members
+ * ([trackerClient], [prepare], [startDownload], [validateSession]) delegating to
+ * [TrackerAppFactory]. `engine`, `sessionStore`, `settings`, the search/downloads/
+ * settings view models, `downloadManager` and the search→download pipeline are wired.
  *
  * Desktop v1 differences from android (by design): there is no [com.surgemusic.app.downloads.NetworkGate]
  * and no `DownloadService` — downloads run in-process, so the queue lives (and pauses) only
@@ -70,38 +71,17 @@ actual object AppContainer {
     /** Stops the OS-language poll loop (shutdown hook — no exit path leaks it). */
     fun stopLocaleMonitor() = localeMonitor.stop()
 
-    private val clientLock = Any()
-
-    @Volatile private var client: RutrackerClient? = null
-
-    /** Base URL the current [client] was built with; a mirror edit (Settings, Task 9) rebuilds it. */
-    @Volatile private var clientMirror: String? = null
-
     /**
-     * Rutracker client singleton — same mirror-rebuild + session re-import pattern as
-     * android. Mirror: rebuilt whenever the edited mirror differs from the current base
-     * URL — the client's constructor is the only mirror seam it exposes. A blank setting
-     * falls back to [RutrackerClient.DEFAULT_BASE_URL]. The old client is closed first (it
-     * holds an OkHttp-backed Ktor engine). Session: re-imported from the session store on
-     * every call (idempotent — two volatile field writes) so a search right after a
-     * paste-cookie login carries the fresh cookies.
+     * Rutracker client singleton — mirror-rebuild + session re-import moved verbatim to
+     * [TrackerAppFactory.trackerClient] (shared with android). A blank mirror setting
+     * falls back to [RutrackerClient.DEFAULT_BASE_URL]; the session is re-imported from
+     * [sessionStore] on every call so a search right after a paste-cookie login carries
+     * the fresh cookies.
      */
-    fun trackerClient(): RutrackerClient {
-        val mirror = settings.mirror.value.trim().ifBlank { RutrackerClient.DEFAULT_BASE_URL }
-        val active: RutrackerClient
-        synchronized(clientLock) {
-            var current = client
-            if (current == null || clientMirror != mirror) {
-                current?.close()
-                current = RutrackerClient(baseUrl = mirror)
-                client = current
-                clientMirror = mirror
-            }
-            active = current!!
-        }
-        sessionStore.session.value?.let { s -> active.importSession(s.cookieHeader, s.userAgent) }
-        return active
-    }
+    fun trackerClient(): RutrackerClient = TrackerAppFactory.trackerClient(
+        base = settings.mirror.value.trim().ifBlank { RutrackerClient.DEFAULT_BASE_URL },
+        session = { sessionStore.session.value?.let { it.cookieHeader to it.userAgent } },
+    )
 
     /** Search view model for the Search tab. */
     val searchViewModel: SearchViewModel by lazy {
@@ -158,57 +138,41 @@ actual object AppContainer {
     }
 
     /**
-     * Shared validate probe — the plan's "settings probe" (Task 9): one test search through
-     * the tracker client. Used by the Settings tab (Validate button + manual import) and by
-     * [com.surgemusic.app.ui.login.DesktopLoginScreen]'s SAVE path (Task 6: save +
-     * validate via the settings probe, then exit only when it passes).
+     * Shared validate probe — the plan's "settings probe" (Task 9): one test search
+     * through [TrackerAppFactory.validateSession]. Used by the Settings tab (Validate
+     * button + manual import) and by [com.surgemusic.app.ui.login.DesktopLoginScreen]'s
+     * SAVE path (Task 6: save + validate via the settings probe, then exit only when it
+     * passes).
      */
-    suspend fun validateSession(): Result<Unit> =
-        trackerClient().search(SearchQuery(text = "test")).map { }
+    suspend fun validateSession(): Result<Unit> = TrackerAppFactory.validateSession { trackerClient() }
 
     /**
-     * Search→download, step 1 (plan Task 8, split for the file chooser): fetch the
-     * .torrent for [row] and parse its file list. A parse failure degrades to an empty
-     * list — the chooser is skipped and everything downloads.
+     * Search→download, step 1 (plan Task 8, split for the file chooser): [TrackerAppFactory.prepare]
+     * fetches the .torrent for [row] and parses its file list (a parse failure degrades
+     * to an empty list — the chooser is skipped and everything downloads).
      */
     suspend fun prepare(row: SearchResultRow): Result<PreparedTorrent> =
-        trackerClient().torrentFile(row.topicId).mapCatching { bytes ->
-            PreparedTorrent(
-                torrentBytes = bytes,
-                files = runCatching { engine.parseFiles(bytes) }.getOrDefault(emptyList()),
-            )
-        }
+        TrackerAppFactory.prepare(row, trackerClient(), engine)
 
     /**
-     * Search→download, step 2: enqueue the prepared torrent with the user's file
-     * selection (empty = all files; the manager forwards it as engine skip priorities)
-     * into [downloadManager] with a per-topic private staging dir under
-     * `~/.surgemusic/staging`. The item's size reflects the selection, so the Downloads
-     * card's byte counters are the selected payload, not the whole torrent. Failures
-     * propagate to the caller — the Search tab surfaces them as a snackbar.
+     * Search→download, step 2: [TrackerAppFactory.startDownload] enqueues the prepared
+     * torrent with the user's file selection into [downloadManager] with a per-topic
+     * private staging dir under `~/.surgemusic/staging`. No foreground service on
+     * desktop — the default no-op [TrackerAppFactory.startDownload]'s `onEnqueued` hook
+     * keeps this the no-FGS path. Failures propagate to the caller — the Search tab
+     * surfaces them as a snackbar.
      */
     suspend fun startDownload(
         row: SearchResultRow,
         prepared: PreparedTorrent,
         wantedFiles: Set<Int>,
-    ): Result<Unit> = runCatching {
-        val selectedBytes = prepared.files
-            .filter { it.index in wantedFiles }
-            .sumOf { it.sizeBytes }
-            .takeIf { it > 0 } ?: row.sizeBytes
-        downloadManager.enqueue(
-            DownloadRequest(
-                id = "t-${row.topicId}",
-                topicId = row.topicId,
-                title = row.title,
-                forumName = row.forumName,
-                sizeBytes = selectedBytes,
-            ),
-            prepared.torrentBytes,
-            stagingDir(row.topicId),
-            wantedFiles,
-        )
-    }
+    ): Result<Unit> = TrackerAppFactory.startDownload(
+        row = row,
+        prepared = prepared,
+        wantedFiles = wantedFiles,
+        downloadManager = downloadManager,
+        stagingRoot = ::stagingDir,
+    )
 
     private fun stagingDir(topicId: Long): String =
         Path.of(System.getProperty("user.home"), DIR_NAME, STAGING_NAME, topicId.toString()).toString()

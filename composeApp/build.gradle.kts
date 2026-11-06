@@ -28,10 +28,19 @@ kotlin {
             implementation(compose.materialIconsExtended)
             implementation(libs.kotlinx.coroutines.core)
         }
+        // Shared by desktop and android (TrackerAppFactory — the AppContainer members that
+        // were near-verbatim on both platforms: tracker client, prepare, startDownload,
+        // validate probe). Sources here are compiled into BOTH the jvm and android target
+        // compilations; hand-wired like :core's jvmShared (the default hierarchy template
+        // is disabled — see gradle.properties).
+        val appShared = create("appShared") { dependsOn(commonMain.get()) }
         // Desktop platform layer for the jvm target (plan Tasks 5/6 add the rest of it).
         // The default hierarchy template is disabled, so wire dependsOn manually —
         // same pattern as :core's jvmShared.
-        val desktopMain = create("desktopMain") { dependsOn(commonMain.get()) }
+        val desktopMain = create("desktopMain") {
+            dependsOn(commonMain.get())
+            dependsOn(appShared)
+        }
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
             // Browser sign-in (CDP cookie capture) talks to a locally-launched Chromium
@@ -46,6 +55,9 @@ kotlin {
         }
         jvmMain {
             dependsOn(desktopMain)
+        }
+        androidMain {
+            dependsOn(appShared)
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
