@@ -24,23 +24,24 @@ object TrackerAppFactory {
 
     private val clientLock = Any()
 
-    @Volatile private var client: RutrackerClient? = null
+    @Volatile private var client: TrackerClient? = null
 
     /** Base URL the current [client] was built with; a mirror edit (Settings, Task 9) rebuilds it. */
     @Volatile private var clientMirror: String? = null
 
     /**
-     * Rutracker client singleton — same mirror-rebuild + session re-import pattern on
-     * both platforms. [base]: the mirror setting resolved by the caller (blank falls back
-     * to [RutrackerClient.DEFAULT_BASE_URL] at the settings seam). Rebuilt whenever
-     * [base] differs from the current base URL — the client's constructor is the only
-     * mirror seam it exposes. The old client is closed first (it holds an OkHttp-backed
-     * Ktor engine). [session]: re-imported into the returned client on every call
-     * (idempotent — two volatile field writes) so a search right after a paste-cookie /
-     * WebView login carries the fresh cookies.
+     * Tracker client singleton (the [TrackerClient] seam — rutracker is just the current
+     * implementation, constructed here as the one concrete spot) — same mirror-rebuild +
+     * session re-import pattern on both platforms. [base]: the mirror setting resolved by
+     * the caller (blank falls back to the rutracker default at the settings seam).
+     * Rebuilt whenever [base] differs from the current base URL — the client's
+     * constructor is the only mirror seam it exposes. The old client is closed first
+     * (it holds an OkHttp-backed Ktor engine). [session]: re-imported into the returned
+     * client on every call (idempotent — two volatile field writes) so a search right
+     * after a paste-cookie / WebView login carries the fresh cookies.
      */
-    fun trackerClient(base: String, session: () -> Pair<String, String>?): RutrackerClient {
-        val active: RutrackerClient
+    fun trackerClient(base: String, session: () -> Pair<String, String>?): TrackerClient {
+        val active: TrackerClient
         synchronized(clientLock) {
             var current = client
             if (current == null || clientMirror != base) {

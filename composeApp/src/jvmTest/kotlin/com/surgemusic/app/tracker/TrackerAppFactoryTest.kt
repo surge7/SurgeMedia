@@ -54,6 +54,11 @@ class TrackerAppFactoryTest {
     ) : TrackerClient {
         val searchQueries = mutableListOf<SearchQuery>()
 
+        /** Session imports through the widened seam, as (cookieHeader, userAgent) pairs. */
+        val importedSessions = mutableListOf<Pair<String, String>>()
+
+        @Volatile var closed = false
+
         override suspend fun login(username: String, password: String): Result<Unit> = Result.success(Unit)
 
         override suspend fun search(query: SearchQuery): Result<SearchResultPage> {
@@ -62,6 +67,12 @@ class TrackerAppFactoryTest {
         }
 
         override suspend fun torrentFile(topicId: Long): Result<ByteArray> = torrent
+
+        override fun importSession(cookieHeader: String, userAgent: String) {
+            importedSessions += cookieHeader to userAgent
+        }
+
+        override fun close() { closed = true }
     }
 
     /**
@@ -300,5 +311,27 @@ class TrackerAppFactoryTest {
         assertSame(client, TrackerAppFactory.trackerClient(base) { null })
 
         client.close()
+    }
+
+    // -------------------------------------------------------------------- seam
+
+    /**
+     * The seam proof: everything the app does with the tracker goes through the
+     * [TrackerClient] interface — a stub with no rutracker import in sight satisfies
+     * login/search/torrentFile, the widened session import and [AutoCloseable.close],
+     * and runs the factory's validate + prepare paths unchanged.
+     */
+    @Test
+    fun appFlowRunsAgainstTheTrackerClientInterfaceAlone() = runBlocking {
+        val fake = StubClient(torrent = Result.success("d4:infoe".toByteArray()))
+        val client: TrackerClient = fake
+
+        client.importSession("bb_session=seam", "UA-seam")
+        TrackerAppFactory.validateSession { client }.getOrThrow()
+        TrackerAppFactory.prepare(row, client, RecordingEngine()).getOrThrow()
+        client.close()
+
+        assertEquals(listOf("bb_session=seam" to "UA-seam"), fake.importedSessions)
+        assertTrue(fake.closed, "close must reach the implementation through the interface")
     }
 }
