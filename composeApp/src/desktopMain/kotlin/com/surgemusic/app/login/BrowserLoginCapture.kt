@@ -29,21 +29,27 @@ import kotlin.coroutines.coroutineContext
  *
  * rutracker sits behind Cloudflare, so the app can't POST credentials itself. Instead
  * [capture] launches the user's real Chromium browser (Chrome / Edge / Yandex — see
- * [findChromiumBrowser]) on the tracker's login page in a throwaway profile with the
- * DevTools remote-debugging port open. The user signs in inside that ordinary browser
- * window (Cloudflare passes because it IS a real browser); meanwhile we poll the page
- * session's cookie jar over the DevTools websocket. As soon as the jar holds the login
- * cookie (`bb_session`) — waiting a few extra seconds for `cf_clearance` when the
+ * [findChromiumBrowser]) on the tracker's login page in a dedicated login profile with
+ * the DevTools remote-debugging port open. The user signs in inside that ordinary
+ * browser window (Cloudflare passes because it IS a real browser); meanwhile we poll
+ * the page session's cookie jar over the DevTools websocket — one socket kept for the
+ * whole capture, standalone cookie getters only, because Cloudflare fingerprints CDP
+ * attach churn and `Network.enable` (see [CookieSocket]). As soon as the jar holds the
+ * login cookie (`bb_session`) — waiting a few extra seconds for `cf_clearance` when the
  * challenge is still running — we assemble the raw Cookie header for the tracker host
  * and pair it with the browser's own User-Agent (read from `/json/version`), which is
  * exactly the pairing Cloudflare requires (cf_clearance is UA-bound). The browser is
- * then closed and the temp profile deleted; the caller persists + validates the
- * [CapturedSession] through the normal session store.
+ * then closed; the profile is kept so challenge state (`cf_clearance`, `cf_chl*`)
+ * survives between attempts — Cloudflare passes more easily on retry and on the next
+ * login. The caller persists + validates the [CapturedSession] through the normal
+ * session store.
  *
  * Why a separate profile: Chrome only accepts `--remote-debugging-port` with a
- * non-default `--user-data-dir`, the user's normal profile is never touched, and
- * everything the login leaves behind is deleted afterwards. Safari and Firefox expose
- * no such debug protocol — for those the manual Cookie/User-Agent import remains.
+ * non-default `--user-data-dir`, and the user's normal profile is never touched. The
+ * login profile lives under `~/.surgemusic` ([defaultLoginProfile]), next to the
+ * session store — no new privacy surface. Tests that want the old delete-after behavior
+ * pass a temp dir plus `deleteProfile = true`. Safari and Firefox expose no such debug
+ * protocol — for those the manual Cookie/User-Agent import remains.
  */
 object BrowserLoginCapture {
 
@@ -57,6 +63,9 @@ object BrowserLoginCapture {
     }
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    /** Continuous challenge-title duration after which [capture] reports a loop via [onChallengeLoop]. */
+    private val challengeLoopAfter: Duration = Duration.ofSeconds(60)
 
     /**
      * First Chromium-based browser found, in preference order (Chrome, Edge, Yandex,
@@ -118,6 +127,15 @@ object BrowserLoginCapture {
      * without it after the grace window, validation decides if it was needed.
      * [extraArgs] lets tests run `--headless=new`; the real flow opens a visible window.
      *
+     * Profile: [profileDir] (tests pass a temp dir there) or, by default, the persistent
+     * [defaultLoginProfile] — kept after the capture, because challenge state
+     * (`cf_clearance`, `cf_chl*`) surviving between attempts is what makes Cloudflare
+     * pass on retry and on the next login; `deleteProfile = true` restores the old
+     * delete-on-exit behavior for throwaway dirs. [onChallengeLoop] fires once when the
+     * page has sat on a Cloudflare interstitial ([isChallengeTitle]) continuously for
+     * over [challengeLoopAfter] — a UI hint, never an abort: the user may still get
+     * through.
+     *
      * Debug port: the browser starts with `--remote-debugging-port=0` — Chrome binds a
      * free port itself (no `freePort()` bind race) and writes the port it picked to
      * `<profileDir>/DevToolsActivePort` (first line). We poll that file for a while;
@@ -131,15 +149,19 @@ object BrowserLoginCapture {
         extraArgs: List<String> = emptyList(),
         timeout: Duration = Duration.ofMinutes(5),
         optionalGrace: Duration = Duration.ofSeconds(8),
+        profileDir: Path? = null,
+        deleteProfile: Boolean = false,
         onStatus: (String) -> Unit = {},
+        onChallengeLoop: () -> Unit = {},
     ): Result = withContext(Dispatchers.IO) {
         val host = runCatching { URI(loginUrl).host }.getOrNull()
             ?: return@withContext Result.Error("cannot parse host from $loginUrl")
-        val profile = Files.createTempDirectory("surgemusic-login")
+        val profile = (profileDir ?: defaultLoginProfile()).also { Files.createDirectories(it) }
         val client = OkHttpClient.Builder()
             .connectTimeout(3, TimeUnit.SECONDS)
             .readTimeout(5, TimeUnit.SECONDS)
             .build()
+        val cookieSocket = CookieSocket(client)
         var process: Process? = null
         try {
             onStatus("launching")
@@ -158,10 +180,13 @@ object BrowserLoginCapture {
             onStatus("waiting for login")
             val deadline = System.nanoTime() + timeout.toNanos()
             var requiredSeenAt = 0L
+            var challengeSince = 0L
+            var challengeLoopReported = false
             while (System.nanoTime() < deadline) {
                 coroutineContext.ensureActive()
                 if (!current.isAlive) return@withContext Result.BrowserClosed
-                val cookies = pageWebSocketUrl(client, port)?.let { fetchCookies(client, it) }.orEmpty()
+                val target = pageTarget(client, port)
+                val cookies = target?.let { cookieSocket.fetch(it.webSocketDebuggerUrl) }.orEmpty()
                 val header = assembleCookieHeader(cookies, host)
                 val hasRequired = cookies.any { it.name == requiredCookie && domainMatches(it.domain, host) }
                 val hasOptional = optionalCookie.isBlank() ||
@@ -173,6 +198,20 @@ object BrowserLoginCapture {
                         return@withContext Result.Success(CapturedSession(header, userAgent))
                     }
                 }
+                // Challenge-loop detection: while the page title stays on a Cloudflare
+                // interstitial, remember when that streak began; after a full minute of
+                // the challenge not resolving, hint the UI once. Deliberately non-fatal —
+                // the user may still tick through. A non-challenge title resets the streak.
+                val now = System.nanoTime()
+                if (target != null && isChallengeTitle(target.title)) {
+                    if (challengeSince == 0L) challengeSince = now
+                    if (!challengeLoopReported && now - challengeSince >= challengeLoopAfter.toNanos()) {
+                        challengeLoopReported = true
+                        onChallengeLoop()
+                    }
+                } else {
+                    challengeSince = 0L
+                }
                 delay(1_500)
             }
             Result.Error("timed out waiting for $requiredCookie cookie")
@@ -180,17 +219,18 @@ object BrowserLoginCapture {
             Result.Error(e.message ?: "failed to launch ${browser.fileName}")
         } finally {
             // NonCancellable: on CANCEL the coroutine is already cancelled when the
-            // finally runs, so the delays below would throw on the spot — skipping both
-            // the graceful-kill wait and the cookie-bearing temp profile deletion.
+            // finally runs, so the delays below would throw on the spot — skipping the
+            // graceful-kill wait and (for throwaway profiles) the cookie-bearing deletion.
             withContext(NonCancellable) {
+                cookieSocket.close()
                 process?.let { stopProcess(it) }
                 client.dispatcher.executorService.shutdown()
-                deleteQuietly(profile)
+                if (deleteProfile) deleteQuietly(profile)
             }
         }
     }
 
-    /** Starts [browser] on [loginUrl] in the throwaway [profile]; only IOException escapes. */
+    /** Starts [browser] on [loginUrl] in the login [profile]; only IOException escapes. */
     private fun launchBrowser(
         browser: Path,
         loginUrl: String,
@@ -259,51 +299,103 @@ object BrowserLoginCapture {
         return null
     }
 
-    /** First real page target's websocket URL from `/json/list`, or null while Chrome is still starting. */
-    private fun pageWebSocketUrl(client: OkHttpClient, port: Int): String? {
+    /** First real page target from `/json/list` — its websocket URL and window title — or null while Chrome is still starting. */
+    private fun pageTarget(client: OkHttpClient, port: Int): PageTarget? {
         val body = httpGet(client, "http://127.0.0.1:$port/json/list") ?: return null
         return runCatching {
             json.parseToJsonElement(body).jsonArray
                 .mapNotNull { it.jsonObject }
                 .firstOrNull { (it["type"]?.jsonPrimitive?.content ?: "") == "page" && !(it["url"]?.jsonPrimitive?.content ?: "").startsWith("devtools://") }
-                ?.get("webSocketDebuggerUrl")?.jsonPrimitive?.content
+                ?.let { entry ->
+                    val wsUrl = entry["webSocketDebuggerUrl"]?.jsonPrimitive?.content ?: return@let null
+                    PageTarget(webSocketDebuggerUrl = wsUrl, title = entry["title"]?.jsonPrimitive?.content ?: "")
+                }
         }.getOrNull()
     }
 
+    /** A real page target from `/json/list`: its DevTools websocket and window title. */
+    private data class PageTarget(val webSocketDebuggerUrl: String, val title: String)
+
     /**
-     * One websocket per poll (simple, and CDP tolerates it): enable Network, then ask
-     * both `Network.getAllCookies` and `Storage.getCookies` — the latter for newer
-     * builds that retire the former — and take whichever answers with a cookie array.
+     * The page-target DevTools websocket, kept open for the whole capture instead of a
+     * fresh attach per poll. Cloudflare's bot management fingerprints CDP attachment:
+     * opening a new websocket every 1.5 s poll — each also sending `Network.enable` on
+     * the challenge page itself — is what put the "Verify you are human" widget into an
+     * endless loop. So [fetch] sends only the two standalone cookie getters with
+     * incrementing ids — `Network.getAllCookies` (older builds) + `Storage.getCookies`
+     * (newer builds that retire the former), whichever answers first wins; neither
+     * requires `Network.enable`, so none is ever sent — and a reconnect happens only
+     * when the page navigated ([pageTarget]'s `webSocketDebuggerUrl` changed) or the
+     * socket died.
      */
-    private fun fetchCookies(client: OkHttpClient, pageWebSocketUrl: String): List<CdpCookie>? {
-        val done = CompletableFuture<List<CdpCookie>>()
-        val socket = client.newWebSocket(
-            Request.Builder().url(pageWebSocketUrl).build(),
-            object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    webSocket.send("""{"id":1,"method":"Network.enable"}""")
-                    webSocket.send("""{"id":2,"method":"Network.getAllCookies"}""")
-                    webSocket.send("""{"id":3,"method":"Storage.getCookies"}""")
-                }
+    private class CookieSocket(private val client: OkHttpClient) {
+        @Volatile private var socket: WebSocket? = null
+        private var attachedTo: String? = null
+        private var nextRequestId = 1
 
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    parseCookieResult(text)?.let { cookies ->
-                        done.complete(cookies)
-                        webSocket.close(1000, null)
-                    }
-                }
+        @Volatile private var pending: CompletableFuture<List<CdpCookie>>? = null
 
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    done.completeExceptionally(t)
+        /** Cookie jar from the page at [url], or null while no answer arrives within 5 s. */
+        fun fetch(url: String): List<CdpCookie>? {
+            val done = CompletableFuture<List<CdpCookie>>()
+            val attached = socket
+            if (attached == null || attachedTo != url) {
+                // (Re)attach: a new page target after navigation, or the old socket died.
+                attached?.cancel()
+                attachedTo = url
+                pending = done
+                socket = client.newWebSocket(
+                    Request.Builder().url(url).build(),
+                    object : WebSocketListener() {
+                        override fun onOpen(webSocket: WebSocket, response: Response) {
+                            sendGetters(webSocket)
+                        }
+
+                        override fun onMessage(webSocket: WebSocket, text: String) {
+                            if (webSocket === socket) parseCookieResult(text)?.let { pending?.complete(it) }
+                        }
+
+                        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                            // Stale callbacks from a just-replaced socket must not kill the new one.
+                            if (webSocket !== socket) return
+                            pending?.completeExceptionally(t)
+                            socket = null
+                        }
+
+                        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                            if (webSocket === socket) socket = null
+                        }
+                    },
+                )
+            } else {
+                pending = done
+                if (!sendGetters(attached)) {
+                    // Send refused — the socket died silently; reconnect on the next poll.
+                    attached.cancel()
+                    socket = null
+                    return null
                 }
-            },
-        )
-        return try {
-            done.get(5, TimeUnit.SECONDS)
-        } catch (e: Exception) {
-            null
-        } finally {
-            socket.cancel()
+            }
+            return try {
+                done.get(5, TimeUnit.SECONDS)
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        /** Both standalone getters, ids incrementing so replies never collide. */
+        private fun sendGetters(webSocket: WebSocket): Boolean {
+            val getAllCookiesId = nextRequestId++
+            val storageId = nextRequestId++
+            val first = webSocket.send("""{"id":$getAllCookiesId,"method":"Network.getAllCookies"}""")
+            webSocket.send("""{"id":$storageId,"method":"Storage.getCookies"}""")
+            return first
+        }
+
+        /** Detaches — capture cleanup. */
+        fun close() {
+            socket?.cancel()
+            socket = null
         }
     }
 
@@ -342,6 +434,26 @@ object BrowserLoginCapture {
             attempts++
         }
     }
+}
+
+/**
+ * Default persistent login profile: `~/.surgemusic/login-profile` — under the user
+ * home, next to the session store. Kept between attempts (unlike the old per-attempt
+ * temp dir) so Cloudflare challenge state survives retries; internal for tests.
+ */
+internal fun defaultLoginProfile(): Path =
+    Path.of(System.getProperty("user.home"), ".surgemusic", "login-profile")
+
+/**
+ * True when a page title looks like a Cloudflare interstitial: "Just a moment…",
+ * "Attention Required!", Russian «Проверка браузера…». Prefix-only on purpose —
+ * conservative, so an ordinary page title never reads as a challenge.
+ */
+internal fun isChallengeTitle(title: String): Boolean {
+    val trimmed = title.trim()
+    return trimmed.startsWith("Just a moment") ||
+        trimmed.startsWith("Attention Required") ||
+        trimmed.startsWith("Проверка браузера")
 }
 
 /** Raw CDP cookie fields — only what the header assembly needs. */

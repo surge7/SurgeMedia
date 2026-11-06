@@ -6,11 +6,13 @@ import org.junit.Assume.assumeTrue
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -18,7 +20,8 @@ import kotlin.test.assertTrue
 /**
  * [BrowserLoginCapture] coverage:
  *
- * - Pure pieces (domain matching, header assembly, CDP reply parsing) run everywhere.
+ * - Pure pieces (domain matching, header assembly, CDP reply parsing, challenge-title
+ *   matching, default-profile resolution) run everywhere.
  * - `capturesCookiesFromRealChromium` runs the real path — launch → /json/version UA →
  *   page websocket → Network.getAllCookies → header assembly — against a local HTTP
  *   server that sets the tracker cookies. Gated on a Chromium browser being installed
@@ -76,6 +79,29 @@ class BrowserLoginCaptureTest {
     }
 
     @Test
+    fun challengeTitleMatching() {
+        assertTrue(isChallengeTitle("Just a moment..."))
+        assertTrue(isChallengeTitle("Just a moment"))
+        assertTrue(isChallengeTitle("Attention Required! | Cloudflare"))
+        assertTrue(isChallengeTitle("Attention Required"))
+        assertTrue(isChallengeTitle("Проверка браузера"))
+        assertTrue(isChallengeTitle("Проверка браузера перед доступом к сайту"))
+        assertTrue(isChallengeTitle("  Just a moment...  "), "surrounding space ignored")
+        assertFalse(isChallengeTitle("rutracker.org :: Вход"), "ordinary titles never match")
+        assertFalse(isChallengeTitle("Just checking your browser"))
+        assertFalse(isChallengeTitle("Browser check"))
+        assertFalse(isChallengeTitle(""))
+    }
+
+    @Test
+    fun defaultLoginProfileIsUnderSurgemusicHome() {
+        assertEquals(
+            Path.of(System.getProperty("user.home"), ".surgemusic", "login-profile"),
+            defaultLoginProfile(),
+        )
+    }
+
+    @Test
     fun capturesCookiesFromRealChromium() {
         val browser = BrowserLoginCapture.findChromiumBrowser()
         assumeTrue(
@@ -83,6 +109,10 @@ class BrowserLoginCaptureTest {
             browser != null || System.getenv("CHROME_BIN") != null,
         )
         val resolved = browser ?: Path.of(System.getenv("CHROME_BIN"))
+        // Tests use a throwaway dir + deleteProfile=true (the real flow keeps its
+        // persistent profile); also implicitly proves the no-enable getters work on
+        // modern Chrome.
+        val profile = Files.createTempDirectory("surgemusic-login-test")
         val server = cookieServer("bb_session=cdp-test-session; Path=/", "cf_clearance=cdp-test-clearance; Path=/")
         try {
             val port = server.localPort
@@ -94,6 +124,8 @@ class BrowserLoginCaptureTest {
                         loginUrl = "http://127.0.0.1:$port/forum/login.php",
                         extraArgs = listOf("--headless=new", "--disable-gpu", "--no-sandbox"),
                         timeout = java.time.Duration.ofSeconds(90),
+                        profileDir = profile,
+                        deleteProfile = true,
                         onStatus = { statuses.add(it) },
                     )
                 }

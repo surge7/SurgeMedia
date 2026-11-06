@@ -159,6 +159,7 @@ interface AppStrings {
     val signInBrowserClosed: String
     val signInBrowserNotFound: String
     fun signInBrowserLaunchFailed(detail: String): String
+    val signInChallengeLoopHint: String
     val unknownError: String
 
     // Accessibility (icon content descriptions)
@@ -318,6 +319,10 @@ object EnStrings : AppStrings {
             "Use manual import below."
     override fun signInBrowserLaunchFailed(detail: String) =
         "Couldn't launch the browser: $detail"
+    override val signInChallengeLoopHint =
+        "The Cloudflare check keeps repeating. Close the browser window and press " +
+            "“Sign in via browser” again — the profile is kept between attempts, so the " +
+            "retry usually passes. Or paste the Cookie header manually below."
     override val unknownError = "unknown error"
 
     override val back = "Back"
@@ -480,6 +485,10 @@ object RuStrings : AppStrings {
             "Используйте ручной импорт ниже."
     override fun signInBrowserLaunchFailed(detail: String) =
         "Не удалось запустить браузер: $detail"
+    override val signInChallengeLoopHint =
+        "Проверка Cloudflare повторяется снова и снова. Закройте окно браузера и нажмите " +
+            "„Войти через браузер“ ещё раз — профиль сохраняется между попытками, и повторная " +
+            "обычно проходит. Или вставьте заголовок Cookie вручную ниже."
     override val unknownError = "неизвестная ошибка"
 
     override val back = "Назад"

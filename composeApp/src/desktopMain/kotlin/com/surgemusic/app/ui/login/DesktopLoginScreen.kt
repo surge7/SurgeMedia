@@ -44,13 +44,15 @@ import kotlinx.coroutines.launch
  * Desktop sign-in — two paths over one panel:
  *
  * 1. **Sign in via browser** (primary): [BrowserLoginCapture] launches the user's real
- *    Chromium browser (Chrome/Edge/Yandex) on the tracker's login page in a throwaway
- *    profile with the DevTools debug port open. The user signs in there — Cloudflare
- *    passes because it is a real browser — and the app polls the cookie jar over CDP
- *    until `bb_session` appears, pairs it with that browser's own User-Agent, closes
- *    the window, then persists + validates through the shared probe
+ *    Chromium browser (Chrome/Edge/Yandex) on the tracker's login page in a persistent
+ *    login profile with the DevTools debug port open. The user signs in there —
+ *    Cloudflare passes because it is a real browser — and the app polls the cookie jar
+ *    over CDP until `bb_session` appears, pairs it with that browser's own User-Agent,
+ *    closes the window, then persists + validates through the shared probe
  *    ([AppContainer.sessionStore] / [AppContainer.validateSession]) and exits via
- *    [onFinished]. This is the desktop twin of androidMain's WebViewLoginScreen.
+ *    [onFinished]. This is the desktop twin of androidMain's WebViewLoginScreen. When
+ *    the Cloudflare check keeps looping, a hint below the status line suggests retrying
+ *    (the kept profile usually passes on the second attempt) or manual import.
  * 2. **Manual import** (fallback for Safari/Firefox): paste the raw Cookie header +
  *    User-Agent (see docs/LOGIN.md) — SAVE validates through the probe first (a test
  *    search against the pasted session imported into the live tracker client) and only
@@ -67,6 +69,7 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
     // Browser-flow state.
     var browserJob by remember { mutableStateOf<Job?>(null) }
     var browserStatus by remember { mutableStateOf<String?>(null) }
+    var challengeLoopSeen by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     // Manual-import state (original flow).
@@ -79,6 +82,7 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
 
     fun startBrowserLogin() {
         error = null
+        challengeLoopSeen = false
         val browser = BrowserLoginCapture.findChromiumBrowser()
         if (browser == null) {
             error = strings.signInBrowserNotFound
@@ -89,7 +93,13 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
             .trimEnd('/')
         browserStatus = strings.signInBrowserWaiting
         browserJob = scope.launch {
-            when (val result = BrowserLoginCapture.capture(browser = browser, loginUrl = "$base/forum/login.php")) {
+            when (
+                val result = BrowserLoginCapture.capture(
+                    browser = browser,
+                    loginUrl = "$base/forum/login.php",
+                    onChallengeLoop = { challengeLoopSeen = true },
+                )
+            ) {
                 is BrowserLoginCapture.Result.Success -> {
                     browserStatus = strings.signInBrowserValidating
                     AppContainer.sessionStore.save(
@@ -172,6 +182,14 @@ fun DesktopLoginScreen(onFinished: () -> Unit) {
                     if (browserStatus != null) {
                         Text(
                             text = browserStatus.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                    if (challengeLoopSeen) {
+                        Text(
+                            text = strings.signInChallengeLoopHint,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 8.dp),
