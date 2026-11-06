@@ -21,6 +21,7 @@ import com.surgemusic.core.engine.TorrentEngine
 import com.surgemusic.core.engine.jvm.JLibTorrentEngine
 import com.surgemusic.core.model.SearchQuery
 import com.surgemusic.core.model.SearchResultRow
+import com.surgemusic.core.tracker.TrackerClient
 import com.surgemusic.core.tracker.jvm.RutrackerClient
 import java.nio.file.Path
 import kotlinx.coroutines.Dispatchers
@@ -72,13 +73,14 @@ actual object AppContainer {
     fun stopLocaleMonitor() = localeMonitor.stop()
 
     /**
-     * Rutracker client singleton — mirror-rebuild + session re-import moved verbatim to
-     * [TrackerAppFactory.trackerClient] (shared with android). A blank mirror setting
-     * falls back to [RutrackerClient.DEFAULT_BASE_URL]; the session is re-imported from
-     * [sessionStore] on every call so a search right after a paste-cookie login carries
-     * the fresh cookies.
+     * Tracker client singleton (the [TrackerClient] seam — mirror-rebuild + session
+     * re-import moved verbatim to [TrackerAppFactory.trackerClient], shared with
+     * android). A blank mirror setting falls back to the rutracker default
+     * ([RutrackerClient.DEFAULT_BASE_URL], the one concrete constant left here); the
+     * session is re-imported from [sessionStore] on every call so a search right after
+     * a paste-cookie login carries the fresh cookies.
      */
-    fun trackerClient(): RutrackerClient = TrackerAppFactory.trackerClient(
+    fun trackerClient(): TrackerClient = TrackerAppFactory.trackerClient(
         base = settings.mirror.value.trim().ifBlank { RutrackerClient.DEFAULT_BASE_URL },
         session = { sessionStore.session.value?.let { it.cookieHeader to it.userAgent } },
     )

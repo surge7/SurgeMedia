@@ -39,7 +39,7 @@ import kotlinx.coroutines.withContext
  */
 class RutrackerClient(
     private val baseUrl: String = DEFAULT_BASE_URL,
-) : TrackerClient, AutoCloseable {
+) : TrackerClient {
 
     private val http = HttpClient(OkHttp) {
         install(HttpTimeout) { requestTimeoutMillis = 30_000 }
@@ -52,10 +52,19 @@ class RutrackerClient(
     @Volatile private var userAgent: String = USER_AGENT
 
     /** Cloudflare-era session import: raw Cookie header from a logged-in browser + its User-Agent. */
+    @JvmName("importSessionWithOptionalUserAgent") // String? erases to String — JVM-name it to avoid clashing with the seam overload below
     fun importSession(cookieHeader: String, harvestedUserAgent: String? = null) {
+        importSession(cookieHeader, harvestedUserAgent ?: "")
+    }
+
+    /**
+     * [TrackerClient] seam entry: raw Cookie header from a logged-in browser + the
+     * User-Agent it was harvested with. A blank [userAgent] keeps the current one.
+     */
+    override fun importSession(cookieHeader: String, userAgent: String) {
         require(cookieHeader.isNotBlank()) { "cookie header must not be blank" }
         sessionCookie = cookieHeader.trim()
-        harvestedUserAgent?.takeIf { it.isNotBlank() }?.let { userAgent = it.trim() }
+        userAgent.takeIf { it.isNotBlank() }?.let { this.userAgent = it.trim() }
     }
 
     internal fun cookieHeader(): String =
