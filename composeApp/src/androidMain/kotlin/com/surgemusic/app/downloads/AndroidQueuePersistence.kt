@@ -17,9 +17,11 @@ import kotlinx.serialization.json.Json
  *
  * Saves go through a tmp sibling + rename (POSIX rename is atomic) so a crash mid-write
  * can never corrupt the store; a missing or corrupt file loads as empty. Load also
- * prunes dead weight: entries whose staging dir vanished are dropped, and staging dirs
- * under the staging root that no entry references anymore are deleted so they don't
- * accumulate forever.
+ * prunes dead weight: non-terminal entries whose staging dir vanished are dropped (their
+ * torrent cannot resume), while terminal entries ([PersistedDownload.isTerminal]) are
+ * exempt — their staging is legitimately deleted after finalize, and they carry the
+ * download history. Staging dirs under the staging root that no non-terminal entry
+ * references anymore are deleted so they don't accumulate forever.
  */
 class AndroidQueuePersistence(context: Context) : QueuePersistence {
 
@@ -32,7 +34,7 @@ class AndroidQueuePersistence(context: Context) : QueuePersistence {
         val entries = runCatching {
             json.decodeFromString(SERIALIZER, text)
         }.getOrDefault(emptyList()) // corrupt JSON → clean start
-        val live = entries.filter { File(it.stagingPath).exists() }
+        val live = entries.filter { it.isTerminal || File(it.stagingPath).exists() }
         sweepOrphans(live)
         live
     }
@@ -51,11 +53,15 @@ class AndroidQueuePersistence(context: Context) : QueuePersistence {
         }
     }
 
-    /** Deletes staging dirs under the staging root no surviving entry references. */
+    /**
+     * Deletes staging dirs under the staging root no surviving NON-terminal entry
+     * references (terminal entries' staging is legitimately gone after finalize).
+     */
     private fun sweepOrphans(live: List<PersistedDownload>) {
         val root = stagingRoot ?: return
         runCatching {
-            val referenced = live.mapTo(mutableSetOf()) { File(it.stagingPath).absolutePath }
+            val referenced = live.filterNot { it.isTerminal }
+                .mapTo(mutableSetOf()) { File(it.stagingPath).absolutePath }
             root.listFiles().orEmpty()
                 .filter { it.absolutePath !in referenced }
                 .forEach { it.deleteRecursively() }

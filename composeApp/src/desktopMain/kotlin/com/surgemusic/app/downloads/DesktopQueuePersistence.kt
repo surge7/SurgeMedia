@@ -18,9 +18,12 @@ import kotlinx.serialization.json.Json
  * Saves are atomic — write a tmp sibling, then `ATOMIC_MOVE` over the target (plain
  * move fallback where atomic rename is unsupported) — so a crash mid-write can never
  * corrupt the store; a missing or corrupt file loads as empty. Load also prunes dead
- * weight: entries whose staging dir vanished are dropped, and staging dirs under the
- * staging root that no entry references anymore (finished/removed downloads whose save
- * never ran) are deleted so they don't accumulate forever.
+ * weight: non-terminal entries whose staging dir vanished are dropped (their torrent
+ * cannot resume), while terminal entries ([PersistedDownload.isTerminal]) are exempt —
+ * their staging is legitimately deleted after finalize, and they carry the download
+ * history. Staging dirs under the staging root that no non-terminal entry references
+ * anymore (finished/removed downloads whose save never ran) are deleted so they don't
+ * accumulate forever.
  */
 class DesktopQueuePersistence(
     private val homeDir: Path = Path.of(System.getProperty("user.home")),
@@ -35,7 +38,7 @@ class DesktopQueuePersistence(
         val entries = runCatching {
             json.decodeFromString(SERIALIZER, text)
         }.getOrDefault(emptyList()) // corrupt JSON → clean start
-        val live = entries.filter { Files.exists(Path.of(it.stagingPath)) }
+        val live = entries.filter { it.isTerminal || Files.exists(Path.of(it.stagingPath)) }
         sweepOrphans(live)
         live
     }
@@ -55,11 +58,15 @@ class DesktopQueuePersistence(
         }
     }
 
-    /** Deletes staging dirs under the staging root no surviving entry references. */
+    /**
+     * Deletes staging dirs under the staging root no surviving NON-terminal entry
+     * references (terminal entries' staging is legitimately gone after finalize).
+     */
     private fun sweepOrphans(live: List<PersistedDownload>) {
         runCatching {
             if (!Files.isDirectory(stagingRoot)) return@runCatching
-            val referenced = live.mapTo(mutableSetOf()) { Path.of(it.stagingPath).toAbsolutePath().toString() }
+            val referenced = live.filterNot { it.isTerminal }
+                .mapTo(mutableSetOf()) { Path.of(it.stagingPath).toAbsolutePath().toString() }
             Files.list(stagingRoot).use { children ->
                 children.filter { it.toAbsolutePath().toString() !in referenced }
                     .forEach { deleteTree(it) }

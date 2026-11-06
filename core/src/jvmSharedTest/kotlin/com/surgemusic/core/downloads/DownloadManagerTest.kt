@@ -645,10 +645,15 @@ class DownloadManagerTest {
                 assertEquals(1, racerStarts.size, "round $round: $stateDump")
             } else {
                 // a restart happened: the plain DONE path wants the new set only, the
-                // raced-to-DONE path wants old+new — the union
-                assertEquals(2, racerStarts.size, "round $round: $stateDump")
-                val wanted = racerStarts.last().wantedFiles
-                assertTrue(wanted == setOf(1, 2) || wanted == setOf(0, 1, 2), "round $round: ${racerStarts}")
+                // raced-to-DONE path wants old+new — the union. The fresh round's
+                // engine.start may still be in flight (the pump defers behind a busy
+                // mutex to its backstop) — it is guaranteed once the churn slot above
+                // freed, so await it before reading the call log instead of racing it.
+                withTimeout(5_000) { while (fake.started.value.count { it.id == "t-1" } < 2) delay(10) }
+                val restartStarts = fake.started.value.filter { it.id == "t-1" }
+                assertEquals(2, restartStarts.size, "round $round: $stateDump")
+                val wanted = restartStarts.last().wantedFiles
+                assertTrue(wanted == setOf(1, 2) || wanted == setOf(0, 1, 2), "round $round: ${restartStarts}")
                 if (wanted == setOf(0, 1, 2)) {
                     sawUnionRestart = true
                     awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
@@ -755,11 +760,24 @@ class DownloadManagerTest {
         )
         assertEquals("/staging/t-1", store.saves.value.last().single().stagingPath)
 
-        // terminal transition (DONE): the item leaves the persisted queue (nothing to resume)
+        // terminal transition (DONE): the item stays persisted as bounded history —
+        // state/size/note ride along so the Downloads tab survives a restart
         assertTrue(engine.events.tryEmit(EngineEvent.Completed("t-1")))
         awaitItem(manager, "t-1") { it.state == DownloadState.DONE }
+        withTimeout(5_000) {
+            while (store.saves.value.last().firstOrNull { it.id == "t-1" }?.state != "DONE") delay(10)
+        }
+        val saved = store.saves.value.last().single()
+        assertEquals("t-1", saved.id)
+        assertEquals("DONE", saved.state)
+        assertEquals(1_000L, saved.bytesTotal)
+        assertEquals("ok", saved.note)
+        assertNull(saved.torrentBytesBase64, "terminal history carries no torrent bytes")
+
+        // removal prunes the persisted history the same way as the in-memory list
+        manager.remove("t-1")
         withTimeout(5_000) { while (store.saves.value.last().containsPersisted("t-1")) delay(10) }
-        assertTrue(store.saves.value.last().isEmpty(), "terminal item must drop out: ${store.saves.value.last()}")
+        assertTrue(store.saves.value.last().isEmpty(), "removed terminal item must drop out: ${store.saves.value.last()}")
     }
 
     @Test
@@ -776,6 +794,113 @@ class DownloadManagerTest {
         awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
         assertEquals(listOf("t-1"), manager.items.value.map { it.request.id })
         assertEquals(1, engine.started.value.size)
+    }
+
+    // ── Restored terminal history (bounded, no revival) ──────────────────────────────
+
+    @Test
+    fun persistenceRestoresTerminalEntriesWithoutEngineRevival() = runBlocking {
+        val engine = FakeEngine()
+        val store = FakeQueuePersistence(
+            loaded = listOf(
+                PersistedDownload(
+                    "t-done", 6918211L, "Done Album", "Rock", null, "/staging/t-done", emptyList(),
+                    state = "DONE", bytesTotal = 1_234, note = "2 files → Music/SurgeMusic/Done Album",
+                ),
+                PersistedDownload(
+                    "t-failed", 6918212L, "Failed Album", "Pop", null, "", emptyList(),
+                    state = "FAILED", bytesTotal = 500, note = "mediastore insert failed",
+                ),
+                PersistedDownload(
+                    "t-live", 6918213L, "Live Album", "Jazz", Base64.encode(torrent), "/staging/t-live",
+                    listOf(0), bytesTotal = 777,
+                ),
+            ),
+        )
+        val manager = DownloadManager(engine, MutableStateFlow(3), store) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+
+        awaitItem(manager, "t-live") { it.state == DownloadState.DOWNLOADING }
+
+        // terminal history restored verbatim — state, size and note, in the right field
+        val done = item(manager, "t-done")
+        assertEquals(DownloadState.DONE, done.state)
+        assertEquals(1_234L, done.bytesTotal)
+        assertEquals("2 files → Music/SurgeMusic/Done Album", done.outputNote)
+        assertNull(done.error)
+        val failed = item(manager, "t-failed")
+        assertEquals(DownloadState.FAILED, failed.state)
+        assertEquals(500L, failed.bytesTotal)
+        assertEquals("mediastore insert failed", failed.error)
+        assertNull(failed.outputNote)
+        // no engine/staging revival: only the non-terminal entry starts, history entries
+        // get no staged start and no teardown churn
+        assertEquals(listOf("t-live"), engine.started.value.map { it.id })
+        assertTrue(engine.cancelled.value.isEmpty(), "restored history must not touch the engine")
+        assertTrue(manager.wantedFiles("t-done").isEmpty())
+        // restored non-terminal item keeps its persisted size before the first Progress tick
+        assertEquals(777L, item(manager, "t-live").bytesTotal)
+    }
+
+    @Test
+    fun reEnqueueOverRestoredTerminalReplacesAndRestarts() = runBlocking {
+        val engine = FakeEngine()
+        val store = FakeQueuePersistence(
+            loaded = listOf(
+                PersistedDownload(
+                    "t-1", 6918211L, "A", "Rock", null, "/staging/t-1", emptyList(),
+                    state = "DONE", bytesTotal = 900, note = "ok",
+                ),
+            ),
+        )
+        val manager = DownloadManager(engine, MutableStateFlow(3), store) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+        awaitItem(manager, "t-1") { it.state == DownloadState.DONE }
+        assertEquals(0, engine.started.value.size)
+
+        manager.enqueue(request("t-1"), torrent, "/staging/t-1") // same id → replaces the history entry
+
+        val restarted = awaitItem(manager, "t-1") { it.state == DownloadState.DOWNLOADING }
+        assertEquals(1, manager.items.value.count { it.request.id == "t-1" })
+        assertEquals(1, engine.started.value.size, "re-enqueue over restored history starts a fresh round")
+        assertEquals("/staging/t-1", engine.started.value.single().targetDir)
+        assertEquals(1_000L, restarted.bytesTotal, "the fresh round uses the new request's size")
+        // the next save persists it as resumable again — with torrent bytes, not DONE history
+        withTimeout(5_000) { while (store.saves.value.lastOrNull() == null) delay(10) }
+        val saved = store.saves.value.last().single { it.id == "t-1" }
+        assertNotNull(saved.torrentBytesBase64, "a re-enqueued round persists with torrent bytes again")
+        assertEquals(1_000L, saved.bytesTotal)
+        assertTrue(saved.state != "DONE", "no longer persisted as terminal history: ${saved.state}")
+    }
+
+    @Test
+    fun persistedHistoryCapsAtNewestHundredTerminalItems() = runBlocking {
+        val engine = FakeEngine()
+        val store = FakeQueuePersistence()
+        val manager = DownloadManager(engine, MutableStateFlow(3), store) { _, _ -> Result.success("ok") }
+        engine.awaitSubscribed()
+
+        repeat(120) { manager.enqueue(request("t-$it"), torrent, "/staging/t-$it") }
+        // Failed transitions QUEUED/DOWNLOADING/PAUSED alike — all 120 become terminal in
+        // event order = completion order (t-0 oldest … t-119 newest)
+        repeat(120) { assertTrue(engine.events.tryEmit(EngineEvent.Failed("t-$it", "boom"))) }
+        awaitItem(manager, "t-119") { it.state == DownloadState.FAILED }
+        // deterministic final flush: one fresh active item rides in front of the history;
+        // every save from here on snapshots the same settled state
+        manager.enqueue(request("t-final"), torrent, "/staging/t-final")
+        withTimeout(5_000) {
+            while (store.saves.value.lastOrNull()?.containsPersisted("t-final") != true) delay(10)
+        }
+
+        val snapshot = store.saves.value.last()
+        assertEquals("t-final", snapshot.first().id, "the active queue precedes the history")
+        val terminalIds = snapshot.filter { it.state == "FAILED" }.map { it.id }
+        assertEquals(100, terminalIds.size, "history caps at 100: ${snapshot.map { it.state }}")
+        assertEquals(
+            (20..119).map { "t-$it" },
+            terminalIds,
+            "the oldest beyond the cap drop; order stays oldest→newest",
+        )
     }
 }
 

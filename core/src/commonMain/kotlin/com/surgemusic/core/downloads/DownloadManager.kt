@@ -40,7 +40,11 @@ data class DownloadItem(
 /**
  * In-memory download queue and state machine over [TorrentEngine], with optional
  * crash/exit recovery via [QueuePersistence]: non-terminal items are re-enqueued as
- * QUEUED on init (torrent bytes ride along Base64-encoded).
+ * QUEUED on init (torrent bytes ride along Base64-encoded), and terminal items come
+ * back as history-only entries (state/size/note restored verbatim, no engine or
+ * staging revival) — the persisted snapshot keeps the newest [TERMINAL_HISTORY_CAP]
+ * terminal entries in completion order plus every non-terminal item, so the Downloads
+ * tab survives a restart.
  *
  * Slot accounting: an item holds a concurrency slot while DOWNLOADING or PAUSED
  * (pause does not free the slot; cancel/failure do). FINALIZING runs off the
@@ -104,6 +108,16 @@ class DownloadManager(
      */
     private val idLocks = MutableStateFlow<Map<String, Mutex>>(emptyMap())
 
+    /**
+     * Terminal ids in completion order (oldest first) — the bounded persisted history's
+     * sort key. [markTerminal] moves an id to the newest end (re-append even when a
+     * stale entry lingers, so the order self-heals across the enqueue/restore races);
+     * [unmarkTerminal] drops ids that leave terminal state or the list entirely.
+     * Seeded from the persisted order on restore (the snapshot stores terminal entries
+     * oldest→newest). Kept forever like [idLocks] — bounded by distinct ids.
+     */
+    private val terminalOrder = MutableStateFlow<List<String>>(emptyList())
+
     private val activeStates =
         setOf(DownloadState.QUEUED, DownloadState.DOWNLOADING, DownloadState.PAUSED)
 
@@ -119,30 +133,61 @@ class DownloadManager(
                 val entries = runCatching { store.load() }.getOrDefault(emptyList())
                 val stagedRestored = mutableMapOf<String, StagedStart>()
                 val requests = mutableListOf<DownloadRequest>()
+                val terminalRestored = mutableListOf<DownloadItem>()
                 for (entry in entries) {
-                    val bytes = entry.torrentBytesBase64
-                        ?.let { b64 -> runCatching { Base64.decode(b64) }.getOrNull() }
-                        ?: continue
-                    stagedRestored[entry.id] =
-                        StagedStart(bytes, entry.stagingPath, entry.wantedFiles.toSet())
-                    requests += DownloadRequest(
-                        id = entry.id,
-                        topicId = entry.topicId,
-                        title = entry.title,
-                        forumName = entry.forumName,
-                        sizeBytes = 0L, // selection-derived bookkeeping; Progress refreshes it
-                    )
+                    val restoredState = DownloadState.entries.firstOrNull { it.name == entry.state }
+                    if (restoredState != null && restoredState in terminalStates) {
+                        // terminal history: state/size/note restored verbatim, no
+                        // engine/staging revival (no staged start, no start, no pump
+                        // eligibility); torrent bytes are not persisted for these
+                        terminalRestored += DownloadItem(
+                            request = DownloadRequest(
+                                id = entry.id,
+                                topicId = entry.topicId,
+                                title = entry.title,
+                                forumName = entry.forumName,
+                                sizeBytes = entry.bytesTotal,
+                            ),
+                            state = restoredState,
+                            bytesTotal = entry.bytesTotal,
+                            error = if (restoredState == DownloadState.DONE) null else entry.note,
+                            outputNote = if (restoredState == DownloadState.DONE) entry.note else null,
+                        )
+                    } else {
+                        val bytes = entry.torrentBytesBase64
+                            ?.let { b64 -> runCatching { Base64.decode(b64) }.getOrNull() }
+                            ?: continue
+                        stagedRestored[entry.id] =
+                            StagedStart(bytes, entry.stagingPath, entry.wantedFiles.toSet())
+                        requests += DownloadRequest(
+                            id = entry.id,
+                            topicId = entry.topicId,
+                            title = entry.title,
+                            forumName = entry.forumName,
+                            sizeBytes = entry.bytesTotal, // shows before the first Progress tick
+                        )
+                    }
                 }
-                if (requests.isEmpty()) return@launch
+                if (requests.isEmpty() && terminalRestored.isEmpty()) return@launch
                 // staged first (same invariant as addFiles' DONE-restart): a pump racing
                 // the item insert must never see a QUEUED item without its staged start.
                 staged.update { it + stagedRestored }
+                var addedTerminalIds: List<String> = emptyList()
                 _items.update { list ->
                     // an enqueue may have claimed a restored id meanwhile — it wins
-                    list + requests
+                    val active = requests
                         .filter { req -> list.none { it.request.id == req.id } }
                         .map { DownloadItem(it) }
+                    val terminal = terminalRestored.filter { restored ->
+                        list.none { it.request.id == restored.request.id } &&
+                            active.none { it.request.id == restored.request.id }
+                    }
+                    addedTerminalIds = terminal.map { it.request.id }
+                    list + active + terminal
                 }
+                // completion order seeds from the file order (terminal entries stored
+                // oldest→newest), only for ids that actually entered the list
+                terminalOrder.update { it + addedTerminalIds }
                 pump()
             }
         }
@@ -197,9 +242,12 @@ class DownloadManager(
             }
         }
         if (changed) {
-            // the reset starts a new round for the id — bump before the pump's
-            // engine.start so a pending DONE teardown of the previous round skips it
-            if (reEnqueued) bumpGeneration(request.id)
+            if (reEnqueued) {
+                // the reset starts a new round for the id — bump before the pump's
+                // engine.start so a pending DONE teardown of the previous round skips it
+                bumpGeneration(request.id)
+                unmarkTerminal(request.id) // left terminal state — out of the history order
+            }
             persistQueue()
         }
         pump()
@@ -332,6 +380,7 @@ class DownloadManager(
         // that start serializes against the teardown on the id's mutex inside
         // the pump, so the teardown can never cancel the fresh round
         bumpGeneration(id)
+        unmarkTerminal(id) // left terminal state — out of the history order
         pump()
         persistQueue()
         return true
@@ -374,6 +423,7 @@ class DownloadManager(
             it.copy(state = DownloadState.CANCELLED)
         }
         if (cancelled) {
+            markTerminal(id)
             cancelEngineUnderLock(id)
             pump()
             persistQueue()
@@ -424,6 +474,7 @@ class DownloadManager(
         }
         _items.update { list -> list.filterNot { it.request.id == id } }
         staged.update { it - id }
+        unmarkTerminal(id) // dropped — out of the history order
         persistQueue()
     }
 
@@ -439,6 +490,7 @@ class DownloadManager(
         terminal.forEach { engine.cancel(it) }
         _items.update { list -> list.filterNot { it.request.id in terminal } }
         staged.update { it - terminal }
+        terminalOrder.update { list -> list - terminal } // dropped — out of the history order
         persistQueue()
     }
 
@@ -583,6 +635,7 @@ class DownloadManager(
                                         it.copy(state = DownloadState.DONE, outputNote = result.getOrNull())
                                     }
                                 if (done) {
+                                    markTerminal(id)
                                     scope.launch { teardownEngine(id, generation) }
                                     persistQueue()
                                 }
@@ -596,7 +649,10 @@ class DownloadManager(
                                             error = result.exceptionOrNull()?.message,
                                         )
                                     }
-                                if (failed) persistQueue()
+                                if (failed) {
+                                    markTerminal(id)
+                                    persistQueue()
+                                }
                             }
                         }
                         pump()
@@ -609,6 +665,7 @@ class DownloadManager(
                     it.copy(state = DownloadState.FAILED, error = event.message)
                 }
                 if (failed) {
+                    markTerminal(event.id)
                     pump()
                     persistQueue()
                 }
@@ -639,6 +696,16 @@ class DownloadManager(
         generations.update { it + (id to ((it[id] ?: 0) + 1)) }
     }
 
+    /** Records [id]'s terminal transition — moves it to the newest end of [terminalOrder]. */
+    private fun markTerminal(id: String) {
+        terminalOrder.update { list -> list.filterNot { it == id } + id }
+    }
+
+    /** Drops [id] from [terminalOrder] — it left terminal state or the list entirely. */
+    private fun unmarkTerminal(id: String) {
+        terminalOrder.update { list -> list - id }
+    }
+
     /** [id]'s start/teardown lock (see [idLocks]); concurrent callers share one instance. */
     private fun lockFor(id: String): Mutex {
         var lock = Mutex()
@@ -652,22 +719,54 @@ class DownloadManager(
         return lock
     }
 
-    /** Non-terminal items with their staged start; terminal items need no resume. */
+    /**
+     * The persisted snapshot: every non-terminal item with its staged start (the
+     * resumable queue), plus the newest [TERMINAL_HISTORY_CAP] terminal items in
+     * completion order — bounded DONE/FAILED/CANCELLED history so the Downloads tab
+     * survives a restart. Terminal entries carry no torrent bytes (their engine/staging
+     * is never revived on restore); `note` carries outputNote (DONE) or error.
+     */
     private fun snapshotForStore(): List<PersistedDownload> {
         val stagedNow = staged.value
-        return _items.value.mapNotNull { item ->
-            if (item.state in terminalStates) return@mapNotNull null
-            val start = stagedNow[item.request.id] ?: return@mapNotNull null
-            PersistedDownload(
-                id = item.request.id,
-                topicId = item.request.topicId,
-                title = item.request.title,
-                forumName = item.request.forumName,
-                torrentBytesBase64 = Base64.encode(start.torrentBytes),
-                stagingPath = start.stagingDir,
-                wantedFiles = start.wantedFiles.sorted(),
-            )
+        val order = terminalOrder.value
+        val active = mutableListOf<PersistedDownload>()
+        val terminal = mutableListOf<PersistedDownload>()
+        for (item in _items.value) {
+            val start = stagedNow[item.request.id]
+            if (item.state in terminalStates) {
+                terminal += PersistedDownload(
+                    id = item.request.id,
+                    topicId = item.request.topicId,
+                    title = item.request.title,
+                    forumName = item.request.forumName,
+                    torrentBytesBase64 = null,
+                    stagingPath = start?.stagingDir ?: "",
+                    wantedFiles = start?.wantedFiles?.sorted() ?: emptyList(),
+                    state = item.state.name,
+                    bytesTotal = item.bytesTotal,
+                    note = item.outputNote ?: item.error,
+                )
+            } else {
+                if (start == null) continue // staged start gone — nothing to resume
+                active += PersistedDownload(
+                    id = item.request.id,
+                    topicId = item.request.topicId,
+                    title = item.request.title,
+                    forumName = item.request.forumName,
+                    torrentBytesBase64 = Base64.encode(start.torrentBytes),
+                    stagingPath = start.stagingDir,
+                    wantedFiles = start.wantedFiles.sorted(),
+                    state = item.state.name,
+                    bytesTotal = item.bytesTotal,
+                )
+            }
         }
+        // oldest→newest; a mid-mark race (id not yet in the order) sorts as newest, and
+        // the cap drops the oldest entries beyond the newest window
+        val capped = terminal
+            .sortedBy { order.indexOf(it.id).takeIf { index -> index >= 0 } ?: Int.MAX_VALUE }
+            .takeLast(TERMINAL_HISTORY_CAP)
+        return active + capped
     }
 
     /** Fire-and-forget store flush, serialized by [persistenceMutex]; failures swallowed. */
@@ -704,5 +803,8 @@ class DownloadManager(
         const val DEFAULT_MAX_CONCURRENT = 3
         const val MIN_CONCURRENT = 1
         const val MAX_CONCURRENT = 5
+
+        /** Terminal items kept in the persisted history — the oldest beyond this drops. */
+        const val TERMINAL_HISTORY_CAP = 100
     }
 }
