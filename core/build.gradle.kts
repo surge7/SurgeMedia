@@ -87,6 +87,13 @@ tasks.named<Test>("jvmTest") {
     extensions.configure<TestRetryTaskExtension> { maxRetries.set(2) }
 }
 
+// Same retry parity for the Android unit-test variant of the shared suite — it runs the
+// same DownloadManager race tests (e.g. addFilesRacingCompletionRestartsWithUnion) that
+// can time out under CI load.
+tasks.withType<Test>().matching { it.name == "testDebugUnitTest" || it.name == "testReleaseUnitTest" }.configureEach {
+    extensions.configure<TestRetryTaskExtension> { maxRetries.set(2) }
+}
+
 android {
     namespace = "com.surgemusic.core"
     compileSdk = 37
