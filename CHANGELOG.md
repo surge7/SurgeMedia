@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.4.1 (2026-11-06)
+
+- **Fixed the desktop login CAPTCHA loop**: browser sign-in no longer trips
+  Cloudflare's automation detection — the capture attaches a single quiet DevTools
+  session (no `Network.enable` churn) instead of reconnecting every 1.5 s, and the
+  sign-in browser now uses a persistent profile (`~/.surgemusic/login-profile`), so
+  the challenge state survives between attempts and retries start warm. If the check
+  still repeats for a minute, the app now shows a hint (retry / manual cookie paste)
+  instead of waiting silently.
+
 ## 0.4.0 (2026-11-06)
 
 - **Reliability pass on the download engine**: tracker announces now send the correct

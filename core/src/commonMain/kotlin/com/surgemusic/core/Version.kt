@@ -1,2 +1,2 @@
 package com.surgemusic.core
-object Version { const val APP = "0.4.0" }
+object Version { const val APP = "0.4.1" }
