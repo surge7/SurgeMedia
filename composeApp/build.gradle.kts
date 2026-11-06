@@ -116,7 +116,7 @@ compose.desktop.application {
         packageName = "SurgeMedia"
         // Installer version: both package managers require MAJOR.MINOR.BUILD >= 1.0.0
         // (the app version itself stays in versionName / Version.APP).
-        packageVersion = "1.0.0"
+        packageVersion = "1.4.0"
 
         if (macOSHost) {
             // Finder-launched apps have CWD=/ so the JVM's default ./hs_err_pid*.log is
@@ -195,8 +195,8 @@ android {
         applicationId = "com.surgemusic.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.3.0"
+        versionCode = 3
+        versionName = "0.4.0"
     }
     // Env-driven release signing: when all four SURGEMUSIC_* vars are present (store
     // upload, CI secret), releases are signed with the real keystore.

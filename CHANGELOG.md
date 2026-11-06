@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## 0.4.0 (2026-11-06)
+
+- **Reliability pass on the download engine**: tracker announces now send the correct
+  raw `info_hash` (they were double-encoded, so the VPN tracker shim never delivered
+  peers); pause/cancel/file-selection during a download's first moments can no longer
+  wedge an item at 100% or leave a cancelled torrent running; disk errors now surface
+  as FAILED instead of an eternal 0% spinner.
+- **Downloads survive restarts**: the queue — and now the finished/failed history
+  (newest 100) — is persisted to disk and restored on launch; orphaned staging folders
+  are swept automatically.
+- **Android 15 background-download quota**: the foreground service tracks its dataSync
+  budget and pauses gracefully before the 6-hour system limit, resuming when the
+  window reopens — no more force-stops mid-discography.
+- **Desktop session security**: the rutracker cookie moves into the OS credential
+  vault (macOS Keychain / Windows DPAPI / Linux secret-tool) with automatic migration
+  from the old plaintext file; remaining file stores write atomically with 0600 perms.
+- **Desktop polish**: storage-folder picker works on Windows/Linux (not just macOS),
+  re-downloading no longer silently overwrites existing files (auto-renames instead),
+  the app takes a single-instance lock and logs crashes to `~/.surgemusic/crash.log`,
+  and UI language follows OS-language changes live.
+- **Search fixes**: pagination no longer fetches the wrong query after editing the
+  field, duplicate rows across pages can't crash the results list, and a new search
+  cancels the stale one.
+- **Settings that apply live**: the concurrent-downloads slider now affects the
+  running queue; settings keys/defaults are shared across platforms.
 - **Windows 11 (x64) desktop**: the same Compose Multiplatform app — identical UI,
   themes, login flow and libtorrent engine — packaged as a per-user MSI + EXE
   installer (Start-menu shortcuts, app icon, fixed upgrade UUID for clean updates).
