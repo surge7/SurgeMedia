@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.4.2 (2026-11-09)
+
+- **Fixed the Cloudflare login loop for real**: opening the sign-in browser with a
+  DevTools port makes Chrome report `navigator.webdriver = true`, which Cloudflare's
+  bot management treats as automation — it challenges the login page and keeps
+  re-challenging it after the "Verify you are human" check is ticked. The sign-in
+  browser now launches with `--disable-blink-features=AutomationControlled`, so the
+  page looks like an ordinary browser again: measured against the live site, the
+  login form now loads directly with no challenge at all.
+
 ## 0.4.1 (2026-11-06)
 
 - **Fixed the desktop login CAPTCHA loop**: browser sign-in no longer trips
