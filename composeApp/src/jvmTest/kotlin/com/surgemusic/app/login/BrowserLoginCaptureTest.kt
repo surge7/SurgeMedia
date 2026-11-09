@@ -22,6 +22,10 @@ import kotlin.test.assertTrue
  *
  * - Pure pieces (domain matching, header assembly, CDP reply parsing, challenge-title
  *   matching, default-profile resolution) run everywhere.
+ * - `launchArgsSuppressAutomationControlled` pins [BrowserLoginCapture.browserLaunchArgs] —
+ *   the anti-automation flag exactly once, with the DevTools port / profile dir / URL /
+ *   extraArgs still present. That one builder feeds both real launch call sites, so this
+ *   also pins what the real-browser path starts Chrome with.
  * - `capturesCookiesFromRealChromium` runs the real path — launch → /json/version UA →
  *   page websocket → Network.getAllCookies → header assembly — against a local HTTP
  *   server that sets the tracker cookies. Gated on a Chromium browser being installed
@@ -102,6 +106,32 @@ class BrowserLoginCaptureTest {
     }
 
     @Test
+    fun launchArgsSuppressAutomationControlled() {
+        val browser = Path.of("/opt/chrome/chrome")
+        val profile = Path.of("/tmp/surgemusic-login-test")
+        val extra = listOf("--headless=new", "--disable-gpu")
+        val args = BrowserLoginCapture.browserLaunchArgs(
+            browser = browser,
+            loginUrl = "https://rutracker.org/forum/login.php",
+            profile = profile,
+            extraArgs = extra,
+            debugPort = 0,
+        )
+        // The whole point of 0.4.2: the DevTools port alone sets navigator.webdriver=true
+        // and Cloudflare re-challenges forever — the suppression flag must ride along,
+        // unconditionally, exactly once.
+        assertEquals(1, args.count { it == "--disable-blink-features=AutomationControlled" }, "flag once: $args")
+        assertTrue(args.any { it.startsWith("--remote-debugging-port=") }, "CDP port kept: $args")
+        assertTrue("--remote-debugging-port=0" in args, "auto-assigned port kept: $args")
+        assertTrue("--user-data-dir=$profile" in args, "login profile kept: $args")
+        assertTrue("https://rutracker.org/forum/login.php" in args, "login URL kept: $args")
+        assertTrue("--headless=new" in args && "--disable-gpu" in args, "extraArgs kept: $args")
+        // ProcessBuilder is positional: browser binary first, URL last.
+        assertEquals(browser.toString(), args.first())
+        assertEquals("https://rutracker.org/forum/login.php", args.last())
+    }
+
+    @Test
     fun capturesCookiesFromRealChromium() {
         val browser = BrowserLoginCapture.findChromiumBrowser()
         assumeTrue(
@@ -111,7 +141,10 @@ class BrowserLoginCaptureTest {
         val resolved = browser ?: Path.of(System.getenv("CHROME_BIN"))
         // Tests use a throwaway dir + deleteProfile=true (the real flow keeps its
         // persistent profile); also implicitly proves the no-enable getters work on
-        // modern Chrome.
+        // modern Chrome. The browser starts with the args pinned by
+        // launchArgsSuppressAutomationControlled — including
+        // --disable-blink-features=AutomationControlled — so a green run here also
+        // proves that flag doesn't break the DevTools port / CDP flow.
         val profile = Files.createTempDirectory("surgemusic-login-test")
         val server = cookieServer("bb_session=cdp-test-session; Path=/", "cf_clearance=cdp-test-clearance; Path=/")
         try {

@@ -44,6 +44,11 @@ import kotlin.coroutines.coroutineContext
  * login. The caller persists + validates the [CapturedSession] through the normal
  * session store.
  *
+ * One launch-arg subtlety: a DevTools port alone makes Chromium flag itself as automated
+ * (`navigator.webdriver === true`), which Cloudflare then challenges forever — so the
+ * launch also carries `--disable-blink-features=AutomationControlled` (see
+ * [browserLaunchArgs]).
+ *
  * Why a separate profile: Chrome only accepts `--remote-debugging-port` with a
  * non-default `--user-data-dir`, and the user's normal profile is never touched. The
  * login profile lives under `~/.surgemusic` ([defaultLoginProfile]), next to the
@@ -230,6 +235,43 @@ object BrowserLoginCapture {
         }
     }
 
+    /**
+     * Launch args for the capture browser: binary first, DevTools port, login profile,
+     * the fixed window flags, [extraArgs] (tests add `--headless=new` there), [loginUrl]
+     * last. Internal so tests can pin the exact args both capture paths (port-0 launch
+     * and fixed-port fallback relaunch) start the browser with.
+     *
+     * Why `--disable-blink-features=AutomationControlled`, applied unconditionally (not
+     * only once a challenge shows up): launching with `--remote-debugging-port` makes
+     * Chromium enable its AutomationControlled runtime feature, so pages see
+     * `navigator.webdriver === true`. Measured on the real site, same fresh profile,
+     * same URL: the port alone → `webdriver = true` and the "Just a moment..."
+     * interstitial; with this flag → `webdriver = false` and the real page, no
+     * challenge. Cloudflare's bot management reads that signal and re-challenges
+     * automation-flagged clients forever — even after the user ticks "Verify you are
+     * human" — so suppressing it restores a clean browser identity. The DevTools port
+     * itself stays open: the cookie polling over the single CDP socket ([CookieSocket])
+     * depends on it, and the flag doesn't disturb the CDP connection, so the harvest
+     * keeps working as before.
+     */
+    internal fun browserLaunchArgs(
+        browser: Path,
+        loginUrl: String,
+        profile: Path,
+        extraArgs: List<String>,
+        debugPort: Int,
+    ): List<String> = buildList {
+        add(browser.toString())
+        add("--remote-debugging-port=$debugPort")
+        add("--user-data-dir=$profile")
+        add("--disable-blink-features=AutomationControlled")
+        add("--no-first-run")
+        add("--no-default-browser-check")
+        add("--window-size=1100,800")
+        addAll(extraArgs)
+        add(loginUrl)
+    }
+
     /** Starts [browser] on [loginUrl] in the login [profile]; only IOException escapes. */
     private fun launchBrowser(
         browser: Path,
@@ -237,16 +279,7 @@ object BrowserLoginCapture {
         profile: Path,
         extraArgs: List<String>,
         debugPort: Int,
-    ): Process = ProcessBuilder(buildList {
-        add(browser.toString())
-        add("--remote-debugging-port=$debugPort")
-        add("--user-data-dir=$profile")
-        add("--no-first-run")
-        add("--no-default-browser-check")
-        add("--window-size=1100,800")
-        addAll(extraArgs)
-        add(loginUrl)
-    })
+    ): Process = ProcessBuilder(browserLaunchArgs(browser, loginUrl, profile, extraArgs, debugPort))
         .redirectOutput(ProcessBuilder.Redirect.DISCARD)
         .redirectErrorStream(true)
         .start()
